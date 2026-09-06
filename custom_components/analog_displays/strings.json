@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Analog Displays",
+        "description": "Name this device. One config entry represents one physical board.",
+        "data": {
+          "name": "Device name"
+        }
+      }
+    }
+  }
+}
