@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and attach release zip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify manifest version matches the tag
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          tag="${TAG_NAME#v}"
+          if [ -z "$tag" ]; then
+            echo "::error::No release tag available; run this from a published release."
+            exit 1
+          fi
+          manifest_version=$(python -c \
+            "import json;print(json.load(open('custom_components/analog_displays/manifest.json'))['version'])")
+          echo "tag=$tag manifest=$manifest_version"
+          if [ "$tag" != "$manifest_version" ]; then
+            echo "::error::manifest.json version ($manifest_version) does not match tag ($tag)"
+            exit 1
+          fi
+
+      - name: Build zip
+        run: |
+          cd custom_components/analog_displays
+          zip -r "$GITHUB_WORKSPACE/analog_displays.zip" . -x '*__pycache__*'
+
+      - name: Attach zip to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: analog_displays.zip

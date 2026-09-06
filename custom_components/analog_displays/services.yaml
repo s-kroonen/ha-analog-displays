@@ -1,0 +1,44 @@
+set_preset:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: analog_displays
+    preset:
+      required: true
+      example: "Power"
+      selector:
+        text:
+
+next_preset:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: analog_displays
+
+previous_preset:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: analog_displays
+
+refresh:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: analog_displays
+
+export_yaml:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: analog_displays

@@ -1,0 +1,40 @@
+name: Bug report
+description: Something in the integration does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Include what you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+    validations:
+      required: true
+  - type: input
+    id: integration-version
+    attributes:
+      label: Analog Displays version
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware and setup path
+      description: >
+        Which board and displays, and did you use the YAML wizard or bind
+        existing hardware?
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      render: text
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Download diagnostics from the device page and paste or attach them.

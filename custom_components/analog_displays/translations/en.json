@@ -1,0 +1,354 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Analog Displays",
+        "description": "Name this device. One config entry represents one physical board.",
+        "data": {
+          "name": "Device name"
+        }
+      },
+      "hardware": {
+        "title": "Hardware",
+        "description": "If you already have firmware on your board, skip the wizard and bind your existing entities.",
+        "menu_options": {
+          "wizard": "Generate ESPHome YAML for me",
+          "bind_displays": "I already have my hardware set up"
+        }
+      },
+      "bind_displays": {
+        "title": "Display {index}",
+        "description": "Pick the number entity that moves this display, and optionally the light entity for its indicator LED.",
+        "data": {
+          "name": "Display name",
+          "output_entity_id": "Output number entity",
+          "light_entity_id": "Indicator LED (optional)",
+          "mode": "LED mode",
+          "fade": "Blend LED colours between stops",
+          "min_update_interval": "Minimum update interval",
+          "add_another": "Add another display"
+        },
+        "data_description": {
+          "min_update_interval": "Rapid source updates are coalesced to at most one write per interval, which spares a mechanical movement.",
+          "fade": "With blending off, the LED switches colour sharply at each stop."
+        }
+      },
+      "preset": {
+        "title": "Preset {index}",
+        "description": "A preset is a scene across the whole device: it decides what every display shows at once.",
+        "data": {
+          "label": "Preset name"
+        }
+      },
+      "preset_assign": {
+        "title": "{preset}: {display}",
+        "description": "Choose what {display} shows under the {preset} preset. Leave the source empty to leave this display unused.",
+        "data": {
+          "source_entity_id": "Source",
+          "min_value": "Value at needle zero",
+          "max_value": "Value at full scale",
+          "colour": "LED colour for this preset",
+          "source_mode": "Source type",
+          "statistic_entity_id": "Statistic",
+          "statistic_type": "Statistic type",
+          "statistic_period": "Statistic period"
+        },
+        "data_description": {
+          "min_value": "Calibration belongs to the preset, so the same display can cover a different range under each preset.",
+          "source_mode": "Live entities push updates. Statistics are polled, and need the recorder."
+        }
+      },
+      "preset_done": {
+        "title": "Preset saved",
+        "description": "Add another preset, or finish setting up this device.",
+        "menu_options": {
+          "preset": "Add another preset",
+          "finish": "Finish"
+        }
+      },
+      "wizard": {
+        "title": "Board",
+        "description": "Pick your board. The wizard only offers pins that are safe to use, and never touches the flash or strapping pins.",
+        "data": {
+          "board": "Board"
+        }
+      },
+      "displays_hw": {
+        "title": "Display {index} wiring",
+        "description": "Which GPIO drives display {index}, and does it have an indicator LED?",
+        "data": {
+          "pin": "Output GPIO",
+          "led_kind": "Indicator LED",
+          "add_another": "Add another display"
+        }
+      },
+      "leds_hw": {
+        "title": "Display {index} LED",
+        "description": "Wiring for the indicator LED on display {index}. Several displays may share one addressable data pin.",
+        "data": {
+          "data_pin": "Data GPIO",
+          "led_index": "Position on the strip",
+          "red_pin": "Red GPIO",
+          "green_pin": "Green GPIO",
+          "blue_pin": "Blue GPIO"
+        }
+      },
+      "buttons_hw": {
+        "title": "Button {index}",
+        "description": "Which GPIO reads button {index}? Leave it empty to finish. Buttons are global to the device, not tied to one display.",
+        "data": {
+          "pin": "Button GPIO",
+          "multi_click": "Detect single, double and long presses",
+          "add_another": "Add another button"
+        }
+      },
+      "yaml_result": {
+        "title": "Your ESPHome configuration",
+        "description": "Flash this with the ESPHome CLI or the web installer. This integration never compiles or flashes anything.\n\nYou will need `analog_displays_api_key`, `analog_displays_ota_password`, `wifi_ssid` and `wifi_password` in your ESPHome secrets.\n\n```yaml\n{yaml}\n```"
+      }
+    },
+    "error": {
+      "output_unavailable": "That entity has no state right now, so its range cannot be read.",
+      "output_no_range": "That number entity does not expose usable minimum and maximum attributes.",
+      "output_already_used": "Another display on this device already writes to that entity.",
+      "same_min_max": "The value at needle zero and the value at full scale must differ.",
+      "preset_drives_nothing": "A preset must drive at least one display.",
+      "invalid_source": "That source cannot be read as configured.",
+      "pin_duplicate": "That pin is already in use on this board.",
+      "pin_unsafe": "That pin is reserved for flash or latched at boot, so it cannot be used.",
+      "pin_not_output_capable": "That pin is input-only and cannot drive a display or LED.",
+      "pin_not_on_board": "That pin does not exist on this board."
+    },
+    "abort": {
+      "invalid_configuration": "The configuration that was assembled is not valid."
+    }
+  },
+  "selector": {
+    "led_mode": {
+      "options": {
+        "preset": "Show the active preset's colour",
+        "gradient": "Colour by value",
+        "off": "Leave the LED off"
+      }
+    },
+    "source_mode": {
+      "options": {
+        "entity": "A live entity",
+        "statistic": "A long-term statistic"
+      }
+    },
+    "statistic_type": {
+      "options": {
+        "mean": "Mean",
+        "min": "Minimum",
+        "max": "Maximum",
+        "sum": "Sum",
+        "state": "State",
+        "change": "Change"
+      }
+    },
+    "statistic_period": {
+      "options": {
+        "hour": "Last hour",
+        "today": "Today",
+        "24h": "Last 24 hours",
+        "7d": "Last 7 days",
+        "30d": "Last 30 days"
+      }
+    },
+    "led_kind": {
+      "options": {
+        "none": "None",
+        "addressable": "Addressable (WS2812 and similar)",
+        "raw_rgb": "Raw RGB (three PWM channels)"
+      }
+    }
+  },
+  "issues": {
+    "source_unavailable": {
+      "title": "{display} has lost its source",
+      "description": "The {preset} preset points {display} on {device} at `{entity_id}`, which is unavailable, unknown or not numeric. The display is holding its last reading rather than dropping to zero.\n\nCheck that the entity still exists and that the integration providing it is loaded. This issue clears itself as soon as the source produces a value again."
+    }
+  },
+  "entity": {
+    "select": {
+      "preset": {
+        "name": "Preset"
+      }
+    },
+    "sensor": {
+      "display_value": {
+        "name": "{display} value"
+      },
+      "display_normalized": {
+        "name": "{display} needle position"
+      }
+    },
+    "binary_sensor": {
+      "display_stale": {
+        "name": "{display} source stale"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Analog Displays",
+        "menu_options": {
+          "displays": "Edit a display",
+          "add_preset": "Add a preset",
+          "remove_preset": "Remove a preset",
+          "intervals": "Polling interval",
+          "export_yaml": "Show the ESPHome YAML again"
+        }
+      },
+      "displays": {
+        "title": "Edit a display",
+        "data": {
+          "display_index": "Display",
+          "name": "Display name",
+          "output_entity_id": "Output number entity",
+          "light_entity_id": "Indicator LED (optional)",
+          "mode": "LED mode",
+          "fade": "Blend LED colours between stops",
+          "min_update_interval": "Minimum update interval"
+        }
+      },
+      "add_preset": {
+        "title": "Preset {index}",
+        "description": "A preset is a scene across the whole device: it decides what every display shows at once.",
+        "data": {
+          "label": "Preset name"
+        }
+      },
+      "edit_assignment": {
+        "title": "{preset}: {display}",
+        "description": "Choose what {display} shows under the {preset} preset. Leave the source empty to leave this display unused.",
+        "data": {
+          "source_entity_id": "Source",
+          "min_value": "Value at needle zero",
+          "max_value": "Value at full scale",
+          "colour": "LED colour for this preset",
+          "source_mode": "Source type",
+          "statistic_entity_id": "Statistic",
+          "statistic_type": "Statistic type",
+          "statistic_period": "Statistic period"
+        },
+        "data_description": {
+          "min_value": "Calibration belongs to the preset, so the same display can cover a different range under each preset.",
+          "source_mode": "Live entities push updates. Statistics are polled, and need the recorder."
+        }
+      },
+      "remove_preset": {
+        "title": "Remove a preset",
+        "data": {
+          "preset_index": "Preset"
+        }
+      },
+      "intervals": {
+        "title": "Polling interval",
+        "description": "How often statistic-backed presets are read from the recorder. Live entity sources push and are not polled.",
+        "data": {
+          "statistics_interval": "Statistics interval"
+        }
+      },
+      "export_yaml": {
+        "title": "Your ESPHome configuration",
+        "description": "Regenerated from your current display and button names.\n\n```yaml\n{yaml}\n```"
+      }
+    },
+    "error": {
+      "output_unavailable": "That entity has no state right now, so its range cannot be read.",
+      "output_no_range": "That number entity does not expose usable minimum and maximum attributes.",
+      "output_already_used": "Another display on this device already writes to that entity.",
+      "same_min_max": "The value at needle zero and the value at full scale must differ.",
+      "preset_drives_nothing": "A preset must drive at least one display.",
+      "invalid_source": "That source cannot be read as configured.",
+      "pin_duplicate": "That pin is already in use on this board.",
+      "pin_unsafe": "That pin is reserved for flash or latched at boot, so it cannot be used.",
+      "pin_not_output_capable": "That pin is input-only and cannot drive a display or LED.",
+      "pin_not_on_board": "That pin does not exist on this board."
+    },
+    "abort": {
+      "invalid_configuration": "The configuration that was assembled is not valid.",
+      "too_many_presets": "This device already has the maximum of eight presets.",
+      "last_preset": "A device must keep at least one preset.",
+      "no_hardware_profile": "This device was not set up with the YAML wizard, so there is nothing to export."
+    }
+  },
+  "services": {
+    "set_preset": {
+      "name": "Set preset",
+      "description": "Switch a device to one of its presets.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The board to switch."
+        },
+        "preset": {
+          "name": "Preset",
+          "description": "The preset's name, or its position starting at 0."
+        }
+      }
+    },
+    "next_preset": {
+      "name": "Next preset",
+      "description": "Advance a device to its next preset, wrapping around at the end.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The board to advance."
+        }
+      }
+    },
+    "previous_preset": {
+      "name": "Previous preset",
+      "description": "Step a device back to its previous preset, wrapping around at the start.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The board to step back."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Refresh",
+      "description": "Force a device to re-read its sources and rewrite its displays immediately.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The board to refresh."
+        }
+      }
+    },
+    "export_yaml": {
+      "name": "Export ESPHome YAML",
+      "description": "Regenerate the ESPHome configuration for a device that was set up with the wizard.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The board to export."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "unknown_device": {
+      "message": "No Analog Displays device with id {device_id}."
+    },
+    "entry_not_loaded": {
+      "message": "The Analog Displays entry for {device_id} is not loaded."
+    },
+    "unknown_preset": {
+      "message": "No preset named or numbered {preset} on this device."
+    },
+    "no_hardware_profile": {
+      "message": "{device} was not set up with the YAML wizard, so there is nothing to export."
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "button_pressed": "{subtype} was pressed"
+    }
+  }
+}
