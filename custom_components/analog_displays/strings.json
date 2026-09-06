@@ -47,10 +47,15 @@
           "source_entity_id": "Source",
           "min_value": "Value at needle zero",
           "max_value": "Value at full scale",
-          "colour": "LED colour for this preset"
+          "colour": "LED colour for this preset",
+          "source_mode": "Source type",
+          "statistic_entity_id": "Statistic",
+          "statistic_type": "Statistic type",
+          "statistic_period": "Statistic period"
         },
         "data_description": {
-          "min_value": "Calibration belongs to the preset, so the same display can cover a different range under each preset."
+          "min_value": "Calibration belongs to the preset, so the same display can cover a different range under each preset.",
+          "source_mode": "Live entities push updates. Statistics are polled, and need the recorder."
         }
       },
       "preset_done": {
@@ -67,7 +72,8 @@
       "output_no_range": "That number entity does not expose usable minimum and maximum attributes.",
       "output_already_used": "Another display on this device already writes to that entity.",
       "same_min_max": "The value at needle zero and the value at full scale must differ.",
-      "preset_drives_nothing": "A preset must drive at least one display."
+      "preset_drives_nothing": "A preset must drive at least one display.",
+      "invalid_source": "That source cannot be read as configured."
     },
     "abort": {
       "invalid_configuration": "The configuration that was assembled is not valid."
@@ -79,6 +85,31 @@
         "preset": "Show the active preset's colour",
         "gradient": "Colour by value",
         "off": "Leave the LED off"
+      }
+    },
+    "source_mode": {
+      "options": {
+        "entity": "A live entity",
+        "statistic": "A long-term statistic"
+      }
+    },
+    "statistic_type": {
+      "options": {
+        "mean": "Mean",
+        "min": "Minimum",
+        "max": "Maximum",
+        "sum": "Sum",
+        "state": "State",
+        "change": "Change"
+      }
+    },
+    "statistic_period": {
+      "options": {
+        "hour": "Last hour",
+        "today": "Today",
+        "24h": "Last 24 hours",
+        "7d": "Last 7 days",
+        "30d": "Last 30 days"
       }
     }
   },

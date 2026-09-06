@@ -27,7 +27,13 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 from .backends import NormalizedValue
 from .backends.number_entity import NumberEntityBackend, UnknownOutputRangeError
-from .const import LED_MODE_GRADIENT, LED_MODE_PRESET, SOURCE_MODE_ENTITY
+from .const import (
+    LED_MODE_GRADIENT,
+    LED_MODE_PRESET,
+    SOURCE_MODE_ENTITY,
+    SOURCE_MODE_STATISTIC,
+)
+from .coordinator import StatisticsCoordinator
 from .led import resolve_colour
 from .models import Device, Display, Preset, PresetAssignment, RGBColor
 from .normalization import normalize
@@ -176,6 +182,10 @@ class DisplayController:
 
     def _read_source(self) -> tuple[float, str | None] | None:
         """Read the active source, or ``None`` if it has nothing usable."""
+        assignment = self.assignment
+        if assignment is not None and assignment.source_mode == SOURCE_MODE_STATISTIC:
+            return self._read_statistic(assignment)
+
         source = self.source_entity_id
         if not source:
             return None
@@ -190,6 +200,28 @@ class DisplayController:
             return None
 
         return raw, state.attributes.get("unit_of_measurement")
+
+    def _read_statistic(
+        self, assignment: PresetAssignment
+    ) -> tuple[float, str | None] | None:
+        """Read this display's statistic out of the device's coordinator."""
+        coordinator = self.runtime.coordinator
+        if coordinator is None or coordinator.data is None:
+            return None
+
+        value = coordinator.data.get(self.index)
+        if value is None:
+            return None
+
+        # Statistics carry no unit of their own, so borrow the source entity's
+        # if it still exists — a text backend will want it.
+        unit: str | None = None
+        if assignment.statistic_entity_id:
+            state = self.hass.states.get(assignment.statistic_entity_id)
+            if state is not None:
+                unit = state.attributes.get("unit_of_measurement")
+
+        return value, unit
 
     async def async_refresh(self) -> None:
         """Re-read the source and write the result to the display."""
@@ -342,10 +374,16 @@ class DeviceRuntime:
         self.device = device
         self.active_preset_index = device.active_preset_index
         self._preset_listeners: list[Callable[[], None]] = []
+        self._coordinator_unsubscribe: Callable[[], None] | None = None
         self.controllers = [
             DisplayController(self, index, display)
             for index, display in enumerate(device.displays)
         ]
+
+        # Only pay for polling if a preset actually reads statistics.
+        self.coordinator: StatisticsCoordinator | None = (
+            StatisticsCoordinator(hass, self) if device.uses_statistics else None
+        )
 
     @property
     def active_preset(self) -> Preset | None:
@@ -368,15 +406,28 @@ class DeviceRuntime:
         return remove
 
     async def async_start(self) -> None:
-        """Start every display controller."""
+        """Start polling if needed, then start every display controller."""
+        if self.coordinator is not None:
+            await self.coordinator.async_config_entry_first_refresh()
+            self._coordinator_unsubscribe = self.coordinator.async_add_listener(
+                self._handle_coordinator_update
+            )
         for controller in self.controllers:
             await controller.async_start()
 
     @callback
     def async_shutdown(self) -> None:
-        """Stop every display controller."""
+        """Stop polling and stop every display controller."""
+        if self._coordinator_unsubscribe is not None:
+            self._coordinator_unsubscribe()
+            self._coordinator_unsubscribe = None
         for controller in self.controllers:
             controller.async_shutdown()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Write freshly polled statistics to the displays that use them."""
+        self.hass.async_create_task(self.async_refresh())
 
     async def async_refresh(self) -> None:
         """Force every display to re-read and re-write, bypassing debounce."""
@@ -388,6 +439,10 @@ class DeviceRuntime:
         if not self.device.presets:
             return
         self.active_preset_index = index % len(self.device.presets)
+        # The coordinator only polls what the active preset needs, so a preset
+        # change has to re-poll before the displays can be written.
+        if self.coordinator is not None:
+            await self.coordinator.async_refresh()
         for controller in self.controllers:
             await controller.async_preset_changed()
         for listener in list(self._preset_listeners):

@@ -1,7 +1,12 @@
 {
   "domain": "analog_displays",
   "name": "Analog Displays",
-  "codeowners": ["@s-kroonen"],
+  "after_dependencies": [
+    "recorder"
+  ],
+  "codeowners": [
+    "@s-kroonen"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/s-kroonen/ha-analog-displays",
   "integration_type": "hub",

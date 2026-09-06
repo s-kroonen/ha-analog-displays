@@ -28,12 +28,21 @@ from .const import (
     CONF_NAME,
     CONF_OUTPUT_ENTITY_ID,
     CONF_SOURCE_ENTITY_ID,
+    CONF_SOURCE_MODE,
+    CONF_STATISTIC_ENTITY_ID,
+    CONF_STATISTIC_PERIOD,
+    CONF_STATISTIC_TYPE,
     DEFAULT_MIN_UPDATE_INTERVAL,
     DOMAIN,
     LED_MODE_GRADIENT,
     LED_MODE_OFF,
     LED_MODE_PRESET,
     MAX_PRESETS,
+    SOURCE_MODE_ENTITY,
+    SOURCE_MODE_STATISTIC,
+    SOURCE_MODES,
+    STATISTIC_PERIODS,
+    STATISTIC_TYPES,
 )
 from .models import (
     AnalogDisplaysConfigError,
@@ -93,9 +102,28 @@ def _assignment_schema() -> vol.Schema:
     """Build the schema for what one display shows under this preset."""
     return vol.Schema(
         {
+            vol.Required(
+                CONF_SOURCE_MODE, default=SOURCE_MODE_ENTITY
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=list(SOURCE_MODES), translation_key="source_mode"
+                )
+            ),
             vol.Optional(CONF_SOURCE_ENTITY_ID): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain=["sensor", "number", "input_number"]
+                )
+            ),
+            vol.Optional(CONF_STATISTIC_ENTITY_ID): selector.StatisticSelector(),
+            vol.Optional(CONF_STATISTIC_TYPE, default="mean"): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=list(STATISTIC_TYPES), translation_key="statistic_type"
+                )
+            ),
+            vol.Optional(CONF_STATISTIC_PERIOD, default="24h"): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=list(STATISTIC_PERIODS),
+                    translation_key="statistic_period",
                 )
             ),
             vol.Required(CONF_MIN_VALUE, default=0.0): selector.NumberSelector(
@@ -262,18 +290,12 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            source_entity_id = user_input.get(CONF_SOURCE_ENTITY_ID)
-            if source_entity_id:
-                assignment = PresetAssignment(
-                    source_entity_id=source_entity_id,
-                    min_value=float(user_input[CONF_MIN_VALUE]),
-                    max_value=float(user_input[CONF_MAX_VALUE]),
-                    colour=_colour_from_input(user_input),
-                )
+            assignment = _assignment_from_input(user_input)
+            if assignment is not None:
                 try:
                     assignment.validate("preset")
                 except AnalogDisplaysConfigError:
-                    errors[CONF_MAX_VALUE] = "same_min_max"
+                    errors[_error_field(assignment)] = _error_key(assignment)
                 else:
                     self._assignments[self._assign_index] = assignment
 
@@ -344,6 +366,47 @@ def _interval(user_input: dict[str, Any]) -> timedelta:
         user_input.get(CONF_MIN_UPDATE_INTERVAL, DEFAULT_MIN_UPDATE_INTERVAL)
     )
     return timedelta(seconds=seconds)
+
+
+def _assignment_from_input(user_input: dict[str, Any]) -> PresetAssignment | None:
+    """Build an assignment from a submitted form, or ``None`` if left blank.
+
+    A blank source is how the user says "this display is not used under this
+    preset", so it is not an error.
+    """
+    mode = user_input.get(CONF_SOURCE_MODE, SOURCE_MODE_ENTITY)
+    source_entity_id = user_input.get(CONF_SOURCE_ENTITY_ID)
+    statistic_entity_id = user_input.get(CONF_STATISTIC_ENTITY_ID)
+
+    if mode == SOURCE_MODE_ENTITY and not source_entity_id:
+        return None
+    if mode == SOURCE_MODE_STATISTIC and not statistic_entity_id:
+        return None
+
+    return PresetAssignment(
+        source_mode=mode,
+        source_entity_id=source_entity_id,
+        statistic_entity_id=statistic_entity_id,
+        statistic_type=user_input.get(CONF_STATISTIC_TYPE),
+        statistic_period=user_input.get(CONF_STATISTIC_PERIOD),
+        min_value=float(user_input[CONF_MIN_VALUE]),
+        max_value=float(user_input[CONF_MAX_VALUE]),
+        colour=_colour_from_input(user_input),
+    )
+
+
+def _error_field(assignment: PresetAssignment) -> str:
+    """Which form field an invalid assignment should be flagged against."""
+    if assignment.min_value == assignment.max_value:
+        return CONF_MAX_VALUE
+    return "base"
+
+
+def _error_key(assignment: PresetAssignment) -> str:
+    """Which translated error an invalid assignment should report."""
+    if assignment.min_value == assignment.max_value:
+        return "same_min_max"
+    return "invalid_source"
 
 
 def _colour_from_input(user_input: dict[str, Any]) -> tuple[int, int, int] | None:
