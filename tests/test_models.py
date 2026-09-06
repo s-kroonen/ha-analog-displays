@@ -86,8 +86,11 @@ def test_round_trip_preserves_everything() -> None:
     device = _device(
         hardware_profile=HardwareProfile(
             board="esp32-devkit-v1",
-            display_pins=[25, 26],
-            button_pins=[4],
+            displays=[
+                {"pin": 25, "led": {"kind": "addressable", "data_pin": 13, "index": 0}},
+                {"pin": 26, "led": None},
+            ],
+            buttons=[{"pin": 4, "multi_click": True}],
         ),
         statistics_interval=timedelta(minutes=10),
     )

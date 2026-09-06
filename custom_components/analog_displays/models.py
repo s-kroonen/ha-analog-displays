@@ -444,21 +444,23 @@ class HardwareProfile:
     """What the YAML wizard produced, kept so it can be re-exported.
 
     Present only when the wizard was used. Nothing on a runtime code path may
-    read this: a user who brought their own firmware has no profile at all.
+    read this: a user who brought their own firmware has no profile at all,
+    and everything still works.
+
+    ``displays`` and ``buttons`` are plain dicts because this is wiring, not
+    behaviour — the generator gives them meaning, and the runtime never looks.
     """
 
     board: str
-    display_pins: list[int] = field(default_factory=list)
-    led_config: list[dict[str, Any]] = field(default_factory=list)
-    button_pins: list[int] = field(default_factory=list)
+    displays: list[dict[str, Any]] = field(default_factory=list)
+    buttons: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for config entry options."""
         return {
             "board": self.board,
-            "display_pins": list(self.display_pins),
-            "led_config": [dict(item) for item in self.led_config],
-            "button_pins": list(self.button_pins),
+            "displays": [dict(item) for item in self.displays],
+            "buttons": [dict(item) for item in self.buttons],
         }
 
     @classmethod
@@ -466,9 +468,8 @@ class HardwareProfile:
         """Deserialize from config entry options."""
         return cls(
             board=data["board"],
-            display_pins=[int(pin) for pin in data.get("display_pins", [])],
-            led_config=list(data.get("led_config", [])),
-            button_pins=[int(pin) for pin in data.get("button_pins", [])],
+            displays=[dict(item) for item in data.get("displays", [])],
+            buttons=[dict(item) for item in data.get("buttons", [])],
         )
 
 

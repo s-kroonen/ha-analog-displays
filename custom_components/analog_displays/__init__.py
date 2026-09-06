@@ -9,6 +9,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .controller import DeviceRuntime
 from .models import AnalogDisplaysConfigError, Device
+from .services import async_register_services
 
 type AnalogDisplaysConfigEntry = ConfigEntry[DeviceRuntime]
 
@@ -32,10 +33,13 @@ async def async_setup_entry(
     runtime = DeviceRuntime(hass, entry.entry_id, device)
     entry.runtime_data = runtime
 
+    async_register_services(hass)
+
     await runtime.async_start()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
+    # Buttons are started after the platforms so a press has somewhere to land.
+    runtime.buttons.async_start()
     return True
 
 
@@ -45,10 +49,3 @@ async def async_unload_entry(
     """Unload a config entry."""
     entry.runtime_data.async_shutdown()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-
-async def _async_reload_entry(
-    hass: HomeAssistant, entry: AnalogDisplaysConfigEntry
-) -> None:
-    """Reload the entry when its options change."""
-    await hass.config_entries.async_reload(entry.entry_id)

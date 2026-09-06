@@ -22,11 +22,13 @@ from homeassistant.const import (
     STATE_UNKNOWN,
 )
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .backends import NormalizedValue
 from .backends.number_entity import NumberEntityBackend, UnknownOutputRangeError
+from .buttons import ButtonDispatcher
 from .const import (
     LED_MODE_GRADIENT,
     LED_MODE_PRESET,
@@ -342,10 +344,15 @@ class DisplayController:
         )
 
     async def _write(self, value: NormalizedValue) -> None:
-        """Hand a value to the output backend, tolerating a bad target."""
+        """Hand a value to the output backend, tolerating a bad target.
+
+        A board that is offline, gone, or not exposing a usable range must not
+        take the config entry down with it — the rest of the device keeps
+        working and the needle simply holds.
+        """
         try:
             await self._backend.write(value)
-        except UnknownOutputRangeError as err:
+        except (UnknownOutputRangeError, HomeAssistantError) as err:
             # Writes repeat every few seconds, so log the cause once and stay
             # quiet until the target recovers rather than flooding the log.
             if not self._output_error_logged:
@@ -384,6 +391,7 @@ class DeviceRuntime:
         self.coordinator: StatisticsCoordinator | None = (
             StatisticsCoordinator(hass, self) if device.uses_statistics else None
         )
+        self.buttons = ButtonDispatcher(self)
 
     @property
     def active_preset(self) -> Preset | None:
@@ -418,6 +426,7 @@ class DeviceRuntime:
     @callback
     def async_shutdown(self) -> None:
         """Stop polling and stop every display controller."""
+        self.buttons.async_shutdown()
         if self._coordinator_unsubscribe is not None:
             self._coordinator_unsubscribe()
             self._coordinator_unsubscribe = None

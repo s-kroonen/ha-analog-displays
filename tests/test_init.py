@@ -218,17 +218,20 @@ async def test_missing_output_entity_does_not_break_setup(
     assert set_value_calls == []
 
 
-async def test_changing_options_reloads_the_entry(
-    hass: HomeAssistant, output: None, set_value_calls: list[ServiceCall]
+async def test_a_failing_write_does_not_take_the_entry_down(
+    hass: HomeAssistant, output: None
 ) -> None:
-    """Options edits must reload cleanly rather than leaving stale bindings."""
+    """An offline board must not stop the rest of the device working."""
     hass.states.async_set("sensor.solar", "1500")
-    entry = await _setup(hass)
 
-    options = device_options()
-    options["presets"][0]["assignments"]["0"]["max_value"] = 1500.0
-    hass.config_entries.async_update_entry(entry, options=options)
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Meter Panel", data={}, options=device_options()
+    )
+    entry.add_to_hass(hass)
+
+    # number.set_value is deliberately not registered, so every write raises.
+    assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    assert set_value_calls[-1].data["value"] == pytest.approx(1.0)
+    assert entry.runtime_data.controllers[0].last_value is None

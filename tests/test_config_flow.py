@@ -107,14 +107,152 @@ async def test_bypass_path_binds_existing_hardware(hass: HomeAssistant) -> None:
     assert options["hardware_profile"] is None
 
 
-async def test_wizard_branch_reaches_the_same_binding_steps(
+async def test_the_wizard_generates_yaml_then_hands_over_to_binding(
     hass: HomeAssistant,
 ) -> None:
-    """The wizard is a detour; it hands over to the same binding steps."""
+    """The wizard is a detour; it ends at the same binding steps."""
     flow_id = await _start(hass)
 
     result = await _configure(hass, flow_id, {"next_step_id": "wizard"})
+    assert result["step_id"] == "wizard"
+
+    result = await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
+    assert result["step_id"] == "displays_hw"
+
+    result = await _configure(
+        hass, flow_id, {"pin": "25", "led_kind": "none", "add_another": False}
+    )
+    assert result["step_id"] == "buttons_hw"
+
+    result = await _configure(
+        hass, flow_id, {"pin": "4", "multi_click": True, "add_another": False}
+    )
+    assert result["step_id"] == "yaml_result"
+    yaml_text = result["description_placeholders"]["yaml"]
+    assert "platform: ledc" in yaml_text
+    assert "GPIO25" in yaml_text
+    assert "number.set" not in yaml_text
+
+    result = await _configure(hass, flow_id, {})
     assert result["step_id"] == "bind_displays"
+
+
+async def test_the_wizard_walks_led_wiring_per_display(hass: HomeAssistant) -> None:
+    """Mixed LED types across displays must work, including a shared strip."""
+    flow_id = await _start(hass)
+    await _configure(hass, flow_id, {"next_step_id": "wizard"})
+    await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
+
+    await _configure(
+        hass, flow_id, {"pin": "25", "led_kind": "addressable", "add_another": True}
+    )
+    await _configure(
+        hass, flow_id, {"pin": "26", "led_kind": "addressable", "add_another": True}
+    )
+    result = await _configure(
+        hass, flow_id, {"pin": "27", "led_kind": "raw_rgb", "add_another": False}
+    )
+    assert result["step_id"] == "leds_hw"
+
+    await _configure(hass, flow_id, {"data_pin": "13", "led_index": 0})
+    # The same data pin again: sharing one strip is the intended wiring.
+    await _configure(hass, flow_id, {"data_pin": "13", "led_index": 1})
+    result = await _configure(
+        hass, flow_id, {"red_pin": "16", "green_pin": "17", "blue_pin": "18"}
+    )
+    assert result["step_id"] == "buttons_hw"
+
+    result = await _configure(
+        hass, flow_id, {"multi_click": False, "add_another": False}
+    )
+    assert result["step_id"] == "yaml_result"
+
+    yaml_text = result["description_placeholders"]["yaml"]
+    assert "esp32_rmt_led_strip" in yaml_text
+    assert "num_leds: 2" in yaml_text
+    assert "platform: partition" in yaml_text
+    assert "platform: rgb" in yaml_text
+    # No buttons were added, so no binary_sensor section exists.
+    assert "binary_sensor:" not in yaml_text
+
+
+async def test_the_wizard_stops_offering_a_pin_once_it_is_taken(
+    hass: HomeAssistant,
+) -> None:
+    """A duplicate is prevented in the picker rather than reported afterwards."""
+    flow_id = await _start(hass)
+    await _configure(hass, flow_id, {"next_step_id": "wizard"})
+    await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
+
+    result = await _configure(
+        hass, flow_id, {"pin": "25", "led_kind": "none", "add_another": True}
+    )
+
+    options = _select_options(result["data_schema"], "pin")
+    assert "25" not in options
+    assert "26" in options
+
+
+async def test_the_wizard_never_offers_an_unsafe_pin(hass: HomeAssistant) -> None:
+    """Flash, strapping and input-only pins must not be selectable at all."""
+    flow_id = await _start(hass)
+    await _configure(hass, flow_id, {"next_step_id": "wizard"})
+    result = await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
+
+    options = _select_options(result["data_schema"], "pin")
+    assert "25" in options
+    assert options.isdisjoint({"0", "2", "6", "9", "12", "15", "34", "39"})
+
+
+async def test_the_wizard_offers_input_only_pins_for_buttons(
+    hass: HomeAssistant,
+) -> None:
+    flow_id = await _start(hass)
+    await _configure(hass, flow_id, {"next_step_id": "wizard"})
+    await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
+    result = await _configure(
+        hass, flow_id, {"pin": "25", "led_kind": "none", "add_another": False}
+    )
+
+    options = _select_options(result["data_schema"], "pin")
+    assert {"34", "39"} <= options
+    assert options.isdisjoint({"0", "12", "25"})
+
+
+async def test_the_wizard_stores_a_hardware_profile(hass: HomeAssistant) -> None:
+    """The profile is what lets export_yaml regenerate later."""
+    flow_id = await _start(hass)
+    await _configure(hass, flow_id, {"next_step_id": "wizard"})
+    await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
+    await _configure(
+        hass, flow_id, {"pin": "25", "led_kind": "none", "add_another": False}
+    )
+    await _configure(
+        hass, flow_id, {"pin": "4", "multi_click": False, "add_another": False}
+    )
+    await _configure(hass, flow_id, {})
+
+    await _configure(hass, flow_id, _display("Left", "number.meter_left"))
+    await _configure(hass, flow_id, {"label": "Power"})
+    await _configure(hass, flow_id, _assignment("sensor.solar"))
+    result = await _configure(hass, flow_id, {"next_step_id": "finish"})
+
+    profile = result["options"]["hardware_profile"]
+    assert profile["board"] == "esp32-devkit-v1"
+    assert profile["displays"] == [{"pin": 25, "led": None}]
+    assert profile["buttons"] == [{"pin": 4, "multi_click": False}]
+
+
+def _select_options(schema: Any, key: str) -> set[str]:
+    """Read the options a SelectSelector offers for one schema field."""
+    for marker, value in schema.schema.items():
+        if str(marker) != key:
+            continue
+        options = value.config["options"]
+        return {
+            option if isinstance(option, str) else option["value"] for option in options
+        }
+    raise AssertionError(f"no field {key!r} in schema")
 
 
 # --- multiple displays and presets -----------------------------------------
