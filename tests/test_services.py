@@ -6,7 +6,6 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers import device_registry as dr
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -14,6 +13,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.analog_displays.const import DOMAIN
+from tests.helpers import device_for
 from tests.test_buttons import _presets
 from tests.test_init import device_options
 
@@ -49,8 +49,7 @@ async def _setup(hass: HomeAssistant, **overrides: Any) -> tuple[MockConfigEntry
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
-    assert device is not None
+    device = device_for(hass, entry)
     return entry, device.id
 
 

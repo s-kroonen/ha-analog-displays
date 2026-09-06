@@ -31,7 +31,6 @@ from .const import (
     ACTION_CALL_SERVICE,
     ACTION_CYCLE_PRESETS,
     ACTION_SET_PRESET,
-    DOMAIN,
     EVENT_BUTTON_PRESSED,
 )
 
@@ -142,12 +141,15 @@ class ButtonDispatcher:
             )
 
     def _device_id(self) -> str | None:
-        """Return this board's Home Assistant device id, if it is registered."""
+        """Return this board's Home Assistant device id, if it is registered.
+
+        Looked up by config entry rather than by identifier: identifiers are
+        not unique across config entries, and Home Assistant 2026.9 deprecated
+        searching by them for exactly that reason.
+        """
         registry = dr.async_get(self.hass)
-        device = registry.async_get_device(
-            identifiers={(DOMAIN, self.runtime.entry_id)}
-        )
-        return None if device is None else device.id
+        devices = dr.async_entries_for_config_entry(registry, self.runtime.entry_id)
+        return devices[0].id if devices else None
 
 
 def _is_press(event: Event[EventStateChangedData], button: ButtonBinding) -> bool:

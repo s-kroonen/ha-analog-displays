@@ -8,7 +8,6 @@ from homeassistant.components import automation
 from homeassistant.components.device_automation import DeviceAutomationType
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import Event, HomeAssistant
-from homeassistant.helpers import device_registry as dr
 from homeassistant.setup import async_setup_component
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -18,6 +17,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.analog_displays.const import DOMAIN, EVENT_BUTTON_PRESSED
+from tests.helpers import device_for
 from tests.test_init import device_options
 
 
@@ -287,8 +287,7 @@ async def test_buttons_appear_as_device_triggers(hass: HomeAssistant) -> None:
             ),
         ],
     )
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
-    assert device is not None
+    device = device_for(hass, entry)
 
     triggers = await async_get_device_automations(
         hass, DeviceAutomationType.TRIGGER, device.id
@@ -303,8 +302,7 @@ async def test_buttons_appear_as_device_triggers(hass: HomeAssistant) -> None:
 
 async def test_a_device_trigger_fires_an_automation(hass: HomeAssistant) -> None:
     entry = await _setup(hass, buttons=[_button()])
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
-    assert device is not None
+    device = device_for(hass, entry)
 
     assert await async_setup_component(
         hass,
@@ -338,8 +336,7 @@ async def test_a_device_trigger_fires_an_automation(hass: HomeAssistant) -> None
 async def test_no_triggers_for_a_device_without_buttons(hass: HomeAssistant) -> None:
     """A board with no buttons bound offers nothing to the automation UI."""
     entry = await _setup(hass, buttons=[])
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
-    assert device is not None
+    device = device_for(hass, entry)
 
     triggers = await async_get_device_automations(
         hass, DeviceAutomationType.TRIGGER, device.id
