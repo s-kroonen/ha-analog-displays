@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Release tags spelled with a capital `V` no longer fail the version check.
+  `release.yml` stripped only a lowercase `v`, so a `V0.1.0` tag was compared
+  literally against the manifest version and rejected.
+- The changelog links pointed at a `v0.1.0` tag that was never published; they
+  now use the tagless form the releases actually use.
+
+### Added
+
+- `scripts/bump_version.py`, which moves `manifest.json` and this changelog to
+  a new version together, refuses to go backwards, and refuses to cut a release
+  from an empty `Unreleased` section.
+- A test asserting the manifest version matches the newest changelog section,
+  so the two cannot drift into a failed release run.
+
 ## [0.1.0]
 
 First release.
@@ -63,5 +79,5 @@ release, the previous minor, and that floor.
 - `manifest.json` declares no requirements: everything is Python's standard
   library plus Home Assistant's own helpers.
 
-[Unreleased]: https://github.com/s-kroonen/ha-analog-displays/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/s-kroonen/ha-analog-displays/releases/tag/v0.1.0
+[Unreleased]: https://github.com/s-kroonen/ha-analog-displays/compare/0.1.0...HEAD
+[0.1.0]: https://github.com/s-kroonen/ha-analog-displays/releases/tag/0.1.0

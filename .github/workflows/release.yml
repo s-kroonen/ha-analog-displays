@@ -19,16 +19,22 @@ jobs:
         env:
           TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
-          tag="${TAG_NAME#v}"
+          # Tags are written without a prefix (0.2.0), but tolerate v0.2.0 and
+          # V0.2.0 rather than failing on a cosmetic difference.
+          tag="${TAG_NAME}"
+          tag="${tag#[vV]}"
           if [ -z "$tag" ]; then
             echo "::error::No release tag available; run this from a published release."
             exit 1
           fi
           manifest_version=$(python -c \
             "import json;print(json.load(open('custom_components/analog_displays/manifest.json'))['version'])")
-          echo "tag=$tag manifest=$manifest_version"
+          echo "tag=$TAG_NAME (normalised to $tag), manifest=$manifest_version"
           if [ "$tag" != "$manifest_version" ]; then
-            echo "::error::manifest.json version ($manifest_version) does not match tag ($tag)"
+            echo "::error::Tag '$TAG_NAME' means version '$tag', but manifest.json says '$manifest_version'."
+            echo "Fix it either way round:"
+            echo "  - retag this release as '$manifest_version', or"
+            echo "  - bump the manifest: python scripts/bump_version.py $tag"
             exit 1
           fi
 
