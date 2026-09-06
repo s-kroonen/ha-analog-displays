@@ -73,6 +73,8 @@ BUTTON_ACTIONS: Final = (
 
 # --- Defaults and limits ---------------------------------------------------
 
+MAX_RGB_CHANNEL: Final = 255
+
 DEFAULT_MIN_UPDATE_INTERVAL: Final = 5.0
 DEFAULT_STATISTICS_INTERVAL: Final = 300.0
 MAX_PRESETS: Final = 8
