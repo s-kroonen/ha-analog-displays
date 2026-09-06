@@ -1,0 +1,354 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Analoge meters",
+        "description": "Geef dit apparaat een naam. Eén configuratie-item staat voor één fysiek bord.",
+        "data": {
+          "name": "Apparaatnaam"
+        }
+      },
+      "hardware": {
+        "title": "Hardware",
+        "description": "Heb je al firmware op je bord staan? Sla de wizard dan over en koppel je bestaande entiteiten.",
+        "menu_options": {
+          "wizard": "Genereer ESPHome-YAML voor mij",
+          "bind_displays": "Mijn hardware is al ingesteld"
+        }
+      },
+      "wizard": {
+        "title": "Bord",
+        "description": "Kies je bord. De wizard biedt alleen pinnen aan die veilig te gebruiken zijn, en raakt de flash- en strapping-pinnen nooit aan.",
+        "data": {
+          "board": "Bord"
+        }
+      },
+      "displays_hw": {
+        "title": "Bedrading meter {index}",
+        "description": "Welke GPIO stuurt meter {index} aan, en heeft die een indicatie-led?",
+        "data": {
+          "pin": "Uitgangs-GPIO",
+          "led_kind": "Indicatie-led",
+          "add_another": "Nog een meter toevoegen"
+        }
+      },
+      "leds_hw": {
+        "title": "Led van meter {index}",
+        "description": "Bedrading van de indicatie-led op meter {index}. Meerdere meters mogen dezelfde datapin delen.",
+        "data": {
+          "data_pin": "Data-GPIO",
+          "led_index": "Positie op de strip",
+          "red_pin": "Rode GPIO",
+          "green_pin": "Groene GPIO",
+          "blue_pin": "Blauwe GPIO"
+        }
+      },
+      "buttons_hw": {
+        "title": "Knop {index}",
+        "description": "Welke GPIO leest knop {index} uit? Laat leeg om af te ronden. Knoppen horen bij het hele apparaat, niet bij één meter.",
+        "data": {
+          "pin": "Knop-GPIO",
+          "multi_click": "Enkele, dubbele en lange drukken herkennen",
+          "add_another": "Nog een knop toevoegen"
+        }
+      },
+      "yaml_result": {
+        "title": "Jouw ESPHome-configuratie",
+        "description": "Flash dit met de ESPHome-CLI of de webinstaller. Deze integratie compileert en flasht zelf nooit iets.\n\nJe hebt `analog_displays_api_key`, `analog_displays_ota_password`, `wifi_ssid` en `wifi_password` nodig in je ESPHome-secrets.\n\n```yaml\n{yaml}\n```"
+      },
+      "bind_displays": {
+        "title": "Meter {index}",
+        "description": "Kies de number-entiteit die deze meter aanstuurt, en eventueel de light-entiteit voor de indicatie-led.",
+        "data": {
+          "name": "Naam van de meter",
+          "output_entity_id": "Number-entiteit als uitgang",
+          "light_entity_id": "Indicatie-led (optioneel)",
+          "mode": "Led-modus",
+          "fade": "Led-kleuren tussen stops mengen",
+          "min_update_interval": "Minimale updateperiode",
+          "add_another": "Nog een meter toevoegen"
+        },
+        "data_description": {
+          "min_update_interval": "Snelle updates van de bron worden samengevoegd tot hooguit één schrijfactie per periode, wat het meetwerk spaart.",
+          "fade": "Zonder mengen springt de led bij elke stop hard naar de volgende kleur."
+        }
+      },
+      "preset": {
+        "title": "Voorkeuze {index}",
+        "description": "Een voorkeuze is een scène over het hele apparaat: hij bepaalt wat elke meter tegelijk laat zien.",
+        "data": {
+          "label": "Naam van de voorkeuze"
+        }
+      },
+      "preset_assign": {
+        "title": "{preset}: {display}",
+        "description": "Kies wat {display} laat zien onder de voorkeuze {preset}. Laat de bron leeg om deze meter ongebruikt te laten.",
+        "data": {
+          "source_mode": "Soort bron",
+          "source_entity_id": "Bron",
+          "statistic_entity_id": "Statistiek",
+          "statistic_type": "Soort statistiek",
+          "statistic_period": "Periode van de statistiek",
+          "min_value": "Waarde bij naald op nul",
+          "max_value": "Waarde bij volle uitslag",
+          "colour": "Led-kleur voor deze voorkeuze"
+        },
+        "data_description": {
+          "min_value": "De kalibratie hoort bij de voorkeuze, dus dezelfde meter kan onder elke voorkeuze een ander bereik dekken.",
+          "source_mode": "Live entiteiten pushen updates. Statistieken worden opgevraagd en vereisen de recorder."
+        }
+      },
+      "preset_done": {
+        "title": "Voorkeuze opgeslagen",
+        "description": "Voeg nog een voorkeuze toe, of rond de installatie van dit apparaat af.",
+        "menu_options": {
+          "preset": "Nog een voorkeuze toevoegen",
+          "finish": "Afronden"
+        }
+      }
+    },
+    "error": {
+      "output_unavailable": "Die entiteit heeft nu geen status, dus het bereik is niet uit te lezen.",
+      "output_no_range": "Die number-entiteit heeft geen bruikbare minimum- en maximumattributen.",
+      "output_already_used": "Een andere meter op dit apparaat schrijft al naar die entiteit.",
+      "same_min_max": "De waarde bij naald op nul en die bij volle uitslag moeten verschillen.",
+      "preset_drives_nothing": "Een voorkeuze moet minstens één meter aansturen.",
+      "invalid_source": "Die bron is niet uit te lezen zoals ingesteld.",
+      "pin_duplicate": "Die pin is al in gebruik op dit bord.",
+      "pin_unsafe": "Die pin is gereserveerd voor flash of wordt bij het opstarten uitgelezen, en is dus niet bruikbaar.",
+      "pin_not_output_capable": "Die pin kan alleen lezen en kan geen meter of led aansturen.",
+      "pin_not_on_board": "Die pin bestaat niet op dit bord."
+    },
+    "abort": {
+      "invalid_configuration": "De samengestelde configuratie is niet geldig."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Analoge meters",
+        "menu_options": {
+          "displays": "Een meter bewerken",
+          "add_preset": "Voorkeuze toevoegen",
+          "remove_preset": "Voorkeuze verwijderen",
+          "intervals": "Opvraaginterval",
+          "export_yaml": "ESPHome-YAML opnieuw tonen"
+        }
+      },
+      "displays": {
+        "title": "Een meter bewerken",
+        "data": {
+          "display_index": "Meter",
+          "name": "Naam van de meter",
+          "output_entity_id": "Number-entiteit als uitgang",
+          "light_entity_id": "Indicatie-led (optioneel)",
+          "mode": "Led-modus",
+          "fade": "Led-kleuren tussen stops mengen",
+          "min_update_interval": "Minimale updateperiode"
+        }
+      },
+      "add_preset": {
+        "title": "Voorkeuze {index}",
+        "description": "Een voorkeuze is een scène over het hele apparaat: hij bepaalt wat elke meter tegelijk laat zien.",
+        "data": {
+          "label": "Naam van de voorkeuze"
+        }
+      },
+      "edit_assignment": {
+        "title": "{preset}: {display}",
+        "description": "Kies wat {display} laat zien onder de voorkeuze {preset}. Laat de bron leeg om deze meter ongebruikt te laten.",
+        "data": {
+          "source_mode": "Soort bron",
+          "source_entity_id": "Bron",
+          "statistic_entity_id": "Statistiek",
+          "statistic_type": "Soort statistiek",
+          "statistic_period": "Periode van de statistiek",
+          "min_value": "Waarde bij naald op nul",
+          "max_value": "Waarde bij volle uitslag",
+          "colour": "Led-kleur voor deze voorkeuze"
+        },
+        "data_description": {
+          "min_value": "De kalibratie hoort bij de voorkeuze, dus dezelfde meter kan onder elke voorkeuze een ander bereik dekken.",
+          "source_mode": "Live entiteiten pushen updates. Statistieken worden opgevraagd en vereisen de recorder."
+        }
+      },
+      "remove_preset": {
+        "title": "Voorkeuze verwijderen",
+        "data": {
+          "preset_index": "Voorkeuze"
+        }
+      },
+      "intervals": {
+        "title": "Opvraaginterval",
+        "description": "Hoe vaak voorkeuzes met statistieken bij de recorder worden opgevraagd. Live entiteitsbronnen pushen en worden niet opgevraagd.",
+        "data": {
+          "statistics_interval": "Statistiekinterval"
+        }
+      },
+      "export_yaml": {
+        "title": "Jouw ESPHome-configuratie",
+        "description": "Opnieuw gegenereerd op basis van je huidige meter- en knopnamen.\n\n```yaml\n{yaml}\n```"
+      }
+    },
+    "error": {
+      "output_unavailable": "Die entiteit heeft nu geen status, dus het bereik is niet uit te lezen.",
+      "output_no_range": "Die number-entiteit heeft geen bruikbare minimum- en maximumattributen.",
+      "output_already_used": "Een andere meter op dit apparaat schrijft al naar die entiteit.",
+      "same_min_max": "De waarde bij naald op nul en die bij volle uitslag moeten verschillen.",
+      "preset_drives_nothing": "Een voorkeuze moet minstens één meter aansturen.",
+      "invalid_source": "Die bron is niet uit te lezen zoals ingesteld.",
+      "pin_duplicate": "Die pin is al in gebruik op dit bord.",
+      "pin_unsafe": "Die pin is gereserveerd voor flash of wordt bij het opstarten uitgelezen, en is dus niet bruikbaar.",
+      "pin_not_output_capable": "Die pin kan alleen lezen en kan geen meter of led aansturen.",
+      "pin_not_on_board": "Die pin bestaat niet op dit bord."
+    },
+    "abort": {
+      "invalid_configuration": "De samengestelde configuratie is niet geldig.",
+      "too_many_presets": "Dit apparaat heeft al het maximum van acht voorkeuzes.",
+      "last_preset": "Een apparaat moet minstens één voorkeuze houden.",
+      "no_hardware_profile": "Dit apparaat is niet met de YAML-wizard opgezet, dus er valt niets te exporteren."
+    }
+  },
+  "selector": {
+    "led_mode": {
+      "options": {
+        "preset": "Kleur van de actieve voorkeuze tonen",
+        "gradient": "Kleuren op basis van de waarde",
+        "off": "Led uit laten"
+      }
+    },
+    "led_kind": {
+      "options": {
+        "none": "Geen",
+        "addressable": "Adresseerbaar (WS2812 en vergelijkbaar)",
+        "raw_rgb": "Losse RGB (drie PWM-kanalen)"
+      }
+    },
+    "source_mode": {
+      "options": {
+        "entity": "Een live entiteit",
+        "statistic": "Een langetermijnstatistiek"
+      }
+    },
+    "statistic_type": {
+      "options": {
+        "mean": "Gemiddelde",
+        "min": "Minimum",
+        "max": "Maximum",
+        "sum": "Som",
+        "state": "Status",
+        "change": "Verandering"
+      }
+    },
+    "statistic_period": {
+      "options": {
+        "hour": "Afgelopen uur",
+        "today": "Vandaag",
+        "24h": "Afgelopen 24 uur",
+        "7d": "Afgelopen 7 dagen",
+        "30d": "Afgelopen 30 dagen"
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "preset": {
+        "name": "Voorkeuze"
+      }
+    },
+    "sensor": {
+      "display_value": {
+        "name": "Waarde van {display}"
+      },
+      "display_normalized": {
+        "name": "Naaldstand van {display}"
+      }
+    },
+    "binary_sensor": {
+      "display_stale": {
+        "name": "Bron van {display} verouderd"
+      }
+    }
+  },
+  "issues": {
+    "source_unavailable": {
+      "title": "{display} is zijn bron kwijt",
+      "description": "De voorkeuze {preset} laat {display} op {device} kijken naar `{entity_id}`, en die is niet beschikbaar, onbekend of niet numeriek. De meter houdt zijn laatste meting vast in plaats van naar nul te zakken.\n\nControleer of de entiteit nog bestaat en of de integratie die hem levert geladen is. Deze melding verdwijnt vanzelf zodra de bron weer een waarde geeft."
+    }
+  },
+  "services": {
+    "set_preset": {
+      "name": "Voorkeuze instellen",
+      "description": "Zet een apparaat op een van zijn voorkeuzes.",
+      "fields": {
+        "device_id": {
+          "name": "Apparaat",
+          "description": "Het bord dat je wilt omschakelen."
+        },
+        "preset": {
+          "name": "Voorkeuze",
+          "description": "De naam van de voorkeuze, of de positie vanaf 0."
+        }
+      }
+    },
+    "next_preset": {
+      "name": "Volgende voorkeuze",
+      "description": "Zet een apparaat op de volgende voorkeuze en begin achteraan weer opnieuw.",
+      "fields": {
+        "device_id": {
+          "name": "Apparaat",
+          "description": "Het bord dat je wilt doorschakelen."
+        }
+      }
+    },
+    "previous_preset": {
+      "name": "Vorige voorkeuze",
+      "description": "Zet een apparaat terug op de vorige voorkeuze en begin vooraan weer opnieuw.",
+      "fields": {
+        "device_id": {
+          "name": "Apparaat",
+          "description": "Het bord dat je wilt terugschakelen."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Verversen",
+      "description": "Laat een apparaat zijn bronnen meteen opnieuw uitlezen en zijn meters opnieuw beschrijven.",
+      "fields": {
+        "device_id": {
+          "name": "Apparaat",
+          "description": "Het bord dat je wilt verversen."
+        }
+      }
+    },
+    "export_yaml": {
+      "name": "ESPHome-YAML exporteren",
+      "description": "Genereer de ESPHome-configuratie opnieuw voor een apparaat dat met de wizard is opgezet.",
+      "fields": {
+        "device_id": {
+          "name": "Apparaat",
+          "description": "Het bord dat je wilt exporteren."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "unknown_device": {
+      "message": "Geen apparaat van Analoge meters met id {device_id}."
+    },
+    "entry_not_loaded": {
+      "message": "Het configuratie-item van Analoge meters voor {device_id} is niet geladen."
+    },
+    "unknown_preset": {
+      "message": "Geen voorkeuze met naam of nummer {preset} op dit apparaat."
+    },
+    "no_hardware_profile": {
+      "message": "{device} is niet met de YAML-wizard opgezet, dus er valt niets te exporteren."
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "button_pressed": "{subtype} is ingedrukt"
+    }
+  }
+}
