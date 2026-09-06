@@ -14,8 +14,11 @@ jobs:
       fail-fast: false
       matrix:
         # pytest-homeassistant-custom-component pins the Home Assistant
-        # version, so this matrix covers the current and previous HA minor.
-        phacc: ["0.13.316", "0.13.290"]
+        # version, so the pin is how the HA version is chosen:
+        #   0.13.364 -> HA 2026.9.1  (current)
+        #   0.13.355 -> HA 2026.8.1  (previous minor)
+        #   0.13.316 -> HA 2026.2.3  (oldest supported, see hacs.json)
+        phacc: ["0.13.364", "0.13.355", "0.13.316"]
     steps:
       - uses: actions/checkout@v5
 
@@ -32,7 +35,7 @@ jobs:
         run: pytest --cov-report=xml
 
       - name: Upload coverage
-        if: matrix.phacc == '0.13.316'
+        if: matrix.phacc == '0.13.364'
         uses: actions/upload-artifact@v4
         with:
           name: coverage

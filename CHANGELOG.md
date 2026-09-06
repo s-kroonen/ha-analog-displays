@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First release.
 
+Requires Home Assistant **2026.2.0** or newer. CI tests against the current
+release, the previous minor, and that floor.
+
 ### Added
 
 - **Display binding.** Drive any `number` entity from any `sensor` entity.

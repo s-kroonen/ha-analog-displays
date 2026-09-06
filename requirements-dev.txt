@@ -1,6 +1,8 @@
-# Pinned by pytest-homeassistant-custom-component; never install
-# homeassistant directly (see CLAUDE.md).
-pytest-homeassistant-custom-component==0.13.316
+# pytest-homeassistant-custom-component pins the matching Home Assistant
+# release; never install homeassistant directly (see CLAUDE.md).
+# This tracks the current HA; CI also tests the previous minor and the
+# oldest supported release declared in hacs.json.
+pytest-homeassistant-custom-component==0.13.364
 ruff==0.16.6
 mypy==2.3.1
 pre-commit
