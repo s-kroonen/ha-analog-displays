@@ -8,23 +8,28 @@ on:
 
 jobs:
   pytest:
-    name: pytest (phacc ${{ matrix.phacc }})
+    name: pytest (py${{ matrix.python }}, phacc ${{ matrix.phacc }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         # pytest-homeassistant-custom-component pins the Home Assistant
-        # version, so the pin is how the HA version is chosen:
-        #   0.13.364 -> HA 2026.9.1  (current)
-        #   0.13.355 -> HA 2026.8.1  (previous minor)
-        #   0.13.316 -> HA 2026.2.3  (oldest supported, see hacs.json)
-        phacc: ["0.13.364", "0.13.355", "0.13.316"]
+        # version, and the Python floor moves with it: HA 2026.8 onwards
+        # requires Python 3.14, and phacc 0.13.316 is the last release that
+        # still supports 3.13. So the two must be chosen together.
+        include:
+          - phacc: "0.13.364"   # HA 2026.9.1, current
+            python: "3.14"
+          - phacc: "0.13.355"   # HA 2026.8.1, previous minor
+            python: "3.14"
+          - phacc: "0.13.316"   # HA 2026.2.3, oldest supported (hacs.json)
+            python: "3.13"
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python }}
 
       - name: Install dependencies
         run: |

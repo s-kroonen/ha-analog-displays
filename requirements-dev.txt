@@ -1,8 +1,10 @@
 # pytest-homeassistant-custom-component pins the matching Home Assistant
 # release; never install homeassistant directly (see CLAUDE.md).
-# This tracks the current HA; CI also tests the previous minor and the
-# oldest supported release declared in hacs.json.
-pytest-homeassistant-custom-component==0.13.364
+#
+# 0.13.316 is the last release that supports Python 3.13, which is what
+# the documented dev environment uses. Newer HA (2026.8+) requires Python
+# 3.14; CI covers those on 3.14 runners.
+pytest-homeassistant-custom-component==0.13.316
 ruff==0.16.6
 mypy==2.3.1
 pre-commit
