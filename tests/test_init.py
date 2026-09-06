@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall
 import pytest
@@ -13,6 +14,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.analog_displays.const import DOMAIN
+from tests.helpers import settle
 
 
 def device_options(**overrides: Any) -> dict[str, Any]:
@@ -86,7 +88,10 @@ async def test_setup_and_unload(
 
 
 async def test_source_change_writes_the_rescaled_value(
-    hass: HomeAssistant, output: None, set_value_calls: list[ServiceCall]
+    hass: HomeAssistant,
+    output: None,
+    set_value_calls: list[ServiceCall],
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """A push from the source lands on the output, scaled into its range."""
     hass.states.async_set("sensor.solar", "0", {"unit_of_measurement": "W"})
@@ -94,7 +99,7 @@ async def test_source_change_writes_the_rescaled_value(
     set_value_calls.clear()
 
     hass.states.async_set("sensor.solar", "1500", {"unit_of_measurement": "W"})
-    await hass.async_block_till_done()
+    await settle(hass, freezer)
 
     assert len(set_value_calls) == 1
     # 1500 of 0-3000 is halfway, and the target's own range is 0.0-1.0.
@@ -134,7 +139,10 @@ async def test_out_of_range_source_is_clamped(
 
 
 async def test_unavailable_source_holds_the_last_value(
-    hass: HomeAssistant, output: None, set_value_calls: list[ServiceCall]
+    hass: HomeAssistant,
+    output: None,
+    set_value_calls: list[ServiceCall],
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """Never snap the needle to zero: a stale reading beats a wrong one."""
     hass.states.async_set("sensor.solar", "1500")
@@ -142,20 +150,23 @@ async def test_unavailable_source_holds_the_last_value(
     set_value_calls.clear()
 
     hass.states.async_set("sensor.solar", "unavailable")
-    await hass.async_block_till_done()
+    await settle(hass, freezer)
 
     assert set_value_calls == []
 
 
 async def test_non_numeric_source_holds_the_last_value(
-    hass: HomeAssistant, output: None, set_value_calls: list[ServiceCall]
+    hass: HomeAssistant,
+    output: None,
+    set_value_calls: list[ServiceCall],
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     hass.states.async_set("sensor.solar", "1500")
     await _setup(hass)
     set_value_calls.clear()
 
     hass.states.async_set("sensor.solar", "brisk")
-    await hass.async_block_till_done()
+    await settle(hass, freezer)
 
     assert set_value_calls == []
 

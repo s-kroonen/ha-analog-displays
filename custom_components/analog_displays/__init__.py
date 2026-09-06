@@ -25,7 +25,7 @@ async def async_setup_entry(
     except (AnalogDisplaysConfigError, KeyError, TypeError, ValueError) as err:
         raise ConfigEntryNotReady(f"Stored configuration is invalid: {err}") from err
 
-    runtime = DeviceRuntime(hass, device)
+    runtime = DeviceRuntime(hass, entry.entry_id, device)
     entry.runtime_data = runtime
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -39,7 +39,7 @@ async def async_unload_entry(
     hass: HomeAssistant, entry: AnalogDisplaysConfigEntry
 ) -> bool:
     """Unload a config entry."""
-    entry.runtime_data.async_stop()
+    entry.runtime_data.async_shutdown()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 

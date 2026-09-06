@@ -1,8 +1,10 @@
 """Per-display runtime logic.
 
 A :class:`DeviceRuntime` owns one :class:`DisplayController` per display and
-keeps them pointed at the active preset. Controllers are what actually read a
-source, normalize it and hand it to an output backend.
+keeps them pointed at the device's active preset. Controllers read a source,
+normalize it, and hand the result to an output backend — rate limited, because
+a power sensor may update every second and hammering a mechanical movement is
+pointless and shortens its life.
 """
 
 from __future__ import annotations
@@ -12,13 +14,15 @@ from typing import TYPE_CHECKING
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
+from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .backends import NormalizedValue
 from .backends.number_entity import NumberEntityBackend, UnknownOutputRangeError
 from .const import SOURCE_MODE_ENTITY
-from .models import Device, Display, PresetAssignment
+from .models import Device, Display, Preset, PresetAssignment
 from .normalization import normalize
+from .repairs import async_clear_source_issue, async_raise_source_issue
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,22 +36,48 @@ class DisplayController:
     """Drives one display from whatever the active preset points it at."""
 
     def __init__(
-        self, hass: HomeAssistant, device: Device, index: int, display: Display
+        self,
+        runtime: DeviceRuntime,
+        index: int,
+        display: Display,
     ) -> None:
         """Bind a controller to one display of a device."""
-        self.hass = hass
+        self.hass = runtime.hass
+        self.entry_id = runtime.entry_id
+        self.runtime = runtime
         self.index = index
         self.display = display
-        self._device = device
-        self._backend = NumberEntityBackend(hass, display.output_entity_id)
+
+        self._backend = NumberEntityBackend(self.hass, display.output_entity_id)
         self._unsubscribe: Callable[[], None] | None = None
+        self._listeners: list[Callable[[], None]] = []
+
         self._last_value: NormalizedValue | None = None
+        self._stale = False
         self._output_error_logged = False
+
+        # Trailing edge, not leading: coalesce a burst of source updates and
+        # write the newest value once the burst settles, so the needle ends up
+        # showing reality rather than whatever arrived first.
+        self._debouncer = Debouncer(
+            self.hass,
+            _LOGGER,
+            cooldown=display.min_update_interval.total_seconds(),
+            immediate=False,
+            function=self.async_refresh,
+        )
+
+    # --- state exposed to entities -----------------------------------------
+
+    @property
+    def device(self) -> Device:
+        """The device configuration this display belongs to."""
+        return self.runtime.device
 
     @property
     def assignment(self) -> PresetAssignment | None:
         """What the active preset points this display at, if anything."""
-        preset = self._device.active_preset
+        preset = self.runtime.active_preset
         if preset is None:
             return None
         return preset.assignment_for(self.index)
@@ -57,40 +87,85 @@ class DisplayController:
         """The most recent value written, held across source outages."""
         return self._last_value
 
-    # --- subscription ------------------------------------------------------
+    @property
+    def stale(self) -> bool:
+        """Whether the displayed value is being held over a dead source."""
+        return self._stale
+
+    @property
+    def source_entity_id(self) -> str | None:
+        """The entity currently feeding this display, if it reads an entity."""
+        assignment = self.assignment
+        if assignment is None or assignment.source_mode != SOURCE_MODE_ENTITY:
+            return None
+        return assignment.source_entity_id
+
+    @callback
+    def async_add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """Register a callback to run whenever this display's state changes."""
+        self._listeners.append(listener)
+
+        @callback
+        def remove() -> None:
+            self._listeners.remove(listener)
+
+        return remove
+
+    @callback
+    def _notify(self) -> None:
+        """Tell every registered entity that something changed."""
+        for listener in list(self._listeners):
+            listener()
+
+    # --- lifecycle ----------------------------------------------------------
 
     async def async_start(self) -> None:
         """Subscribe to the active source and write its current value."""
-        assignment = self.assignment
-        if assignment is not None and assignment.source_mode == SOURCE_MODE_ENTITY:
-            source = assignment.source_entity_id
-            if source:
-                self._unsubscribe = async_track_state_change_event(
-                    self.hass, [source], self._handle_source_change
-                )
+        self._async_subscribe()
         await self.async_refresh()
 
     @callback
-    def async_stop(self) -> None:
-        """Drop the source subscription."""
+    def async_shutdown(self) -> None:
+        """Drop the subscription and cancel any pending debounced write."""
+        self._async_unsubscribe()
+        self._debouncer.async_shutdown()
+
+    @callback
+    def _async_subscribe(self) -> None:
+        """Watch the active preset's source for push updates."""
+        source = self.source_entity_id
+        if source:
+            self._unsubscribe = async_track_state_change_event(
+                self.hass, [source], self._handle_source_change
+            )
+
+    @callback
+    def _async_unsubscribe(self) -> None:
+        """Stop watching the current source."""
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
 
+    async def async_preset_changed(self) -> None:
+        """Re-point at the new active preset and write immediately.
+
+        A preset change is a deliberate user action, so it bypasses the
+        debounce: the needle must move the moment the preset does.
+        """
+        self._async_unsubscribe()
+        self._async_subscribe()
+        await self.async_refresh()
+
     @callback
     def _handle_source_change(self, event: Event[EventStateChangedData]) -> None:
-        """React to a push update from the source entity."""
-        self.hass.async_create_task(self.async_refresh())
+        """Queue a rate-limited write in response to a push from the source."""
+        self._debouncer.async_schedule_call()
 
     # --- reading and writing ------------------------------------------------
 
     def _read_source(self) -> tuple[float, str | None] | None:
         """Read the active source, or ``None`` if it has nothing usable."""
-        assignment = self.assignment
-        if assignment is None or assignment.source_mode != SOURCE_MODE_ENTITY:
-            return None
-
-        source = assignment.source_entity_id
+        source = self.source_entity_id
         if not source:
             return None
 
@@ -109,23 +184,67 @@ class DisplayController:
         """Re-read the source and write the result to the display."""
         assignment = self.assignment
         if assignment is None:
-            # This display is not in use under the active preset.
+            # No preset points here: this display is simply not in use.
+            self._async_clear_stale()
             await self._write(NormalizedValue(normalized=0.0))
+            self._notify()
             return
 
         reading = self._read_source()
         if reading is None:
-            # Hold the last displayed value: a stale but plausible reading
-            # beats a needle confidently pinned to zero.
+            self._async_mark_stale(assignment)
             return
 
+        self._async_clear_stale()
         raw, unit = reading
-        value = NormalizedValue(
-            normalized=normalize(raw, assignment.min_value, assignment.max_value),
-            raw=raw,
-            unit=unit,
+        await self._write(
+            NormalizedValue(
+                normalized=normalize(raw, assignment.min_value, assignment.max_value),
+                raw=raw,
+                unit=unit,
+            )
         )
-        await self._write(value)
+        self._notify()
+
+    @callback
+    def _async_mark_stale(self, assignment: PresetAssignment) -> None:
+        """Hold the needle where it is and raise a repair issue.
+
+        Never snap to zero: a stale but plausible reading is far better than a
+        confidently wrong one. The LED is deliberately left alone — LEDs show
+        the preset or the value, never an error.
+        """
+        if self._stale:
+            return
+
+        self._stale = True
+        source = assignment.source_entity_id or "(unset)"
+        preset = self.runtime.active_preset
+        _LOGGER.error(
+            "Source %s for display %s is unavailable; holding the last value",
+            source,
+            self.display.name,
+        )
+        async_raise_source_issue(
+            self.hass,
+            self.entry_id,
+            self.index,
+            device_name=self.device.name,
+            display_name=self.display.name,
+            preset_label="" if preset is None else preset.label,
+            source_entity_id=source,
+        )
+        self._notify()
+
+    @callback
+    def _async_clear_stale(self) -> None:
+        """Clear the repair issue once the source produces values again."""
+        if not self._stale:
+            return
+
+        self._stale = False
+        async_clear_source_issue(self.hass, self.entry_id, self.index)
+        _LOGGER.info("Source for display %s recovered", self.display.name)
 
     async def _write(self, value: NormalizedValue) -> None:
         """Hand a value to the output backend, tolerating a bad target."""
@@ -146,16 +265,30 @@ class DisplayController:
 
 
 class DeviceRuntime:
-    """Everything one config entry needs while it is loaded."""
+    """Everything one config entry needs while it is loaded.
 
-    def __init__(self, hass: HomeAssistant, device: Device) -> None:
+    The active preset lives here rather than on :class:`Device` because the
+    device model is frozen: it is what was persisted, while this is what is
+    currently showing.
+    """
+
+    def __init__(self, hass: HomeAssistant, entry_id: str, device: Device) -> None:
         """Build a controller for each of the device's displays."""
         self.hass = hass
+        self.entry_id = entry_id
         self.device = device
+        self.active_preset_index = device.active_preset_index
         self.controllers = [
-            DisplayController(hass, device, index, display)
+            DisplayController(self, index, display)
             for index, display in enumerate(device.displays)
         ]
+
+    @property
+    def active_preset(self) -> Preset | None:
+        """The preset currently driving the displays."""
+        if not self.device.presets:
+            return None
+        return self.device.presets[self.active_preset_index % len(self.device.presets)]
 
     async def async_start(self) -> None:
         """Start every display controller."""
@@ -163,7 +296,20 @@ class DeviceRuntime:
             await controller.async_start()
 
     @callback
-    def async_stop(self) -> None:
+    def async_shutdown(self) -> None:
         """Stop every display controller."""
         for controller in self.controllers:
-            controller.async_stop()
+            controller.async_shutdown()
+
+    async def async_refresh(self) -> None:
+        """Force every display to re-read and re-write, bypassing debounce."""
+        for controller in self.controllers:
+            await controller.async_refresh()
+
+    async def async_set_preset(self, index: int) -> None:
+        """Switch the whole device to another preset and write immediately."""
+        if not self.device.presets:
+            return
+        self.active_preset_index = index % len(self.device.presets)
+        for controller in self.controllers:
+            await controller.async_preset_changed()
