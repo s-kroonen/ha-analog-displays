@@ -7,6 +7,78 @@
         "data": {
           "name": "Device name"
         }
+      },
+      "hardware": {
+        "title": "Hardware",
+        "description": "If you already have firmware on your board, skip the wizard and bind your existing entities.",
+        "menu_options": {
+          "wizard": "Generate ESPHome YAML for me",
+          "bind_displays": "I already have my hardware set up"
+        }
+      },
+      "bind_displays": {
+        "title": "Display {index}",
+        "description": "Pick the number entity that moves this display, and optionally the light entity for its indicator LED.",
+        "data": {
+          "name": "Display name",
+          "output_entity_id": "Output number entity",
+          "light_entity_id": "Indicator LED (optional)",
+          "mode": "LED mode",
+          "fade": "Blend LED colours between stops",
+          "min_update_interval": "Minimum update interval",
+          "add_another": "Add another display"
+        },
+        "data_description": {
+          "min_update_interval": "Rapid source updates are coalesced to at most one write per interval, which spares a mechanical movement.",
+          "fade": "With blending off, the LED switches colour sharply at each stop."
+        }
+      },
+      "preset": {
+        "title": "Preset {index}",
+        "description": "A preset is a scene across the whole device: it decides what every display shows at once.",
+        "data": {
+          "label": "Preset name"
+        }
+      },
+      "preset_assign": {
+        "title": "{preset}: {display}",
+        "description": "Choose what {display} shows under the {preset} preset. Leave the source empty to leave this display unused.",
+        "data": {
+          "source_entity_id": "Source",
+          "min_value": "Value at needle zero",
+          "max_value": "Value at full scale",
+          "colour": "LED colour for this preset"
+        },
+        "data_description": {
+          "min_value": "Calibration belongs to the preset, so the same display can cover a different range under each preset."
+        }
+      },
+      "preset_done": {
+        "title": "Preset saved",
+        "description": "Add another preset, or finish setting up this device.",
+        "menu_options": {
+          "preset": "Add another preset",
+          "finish": "Finish"
+        }
+      }
+    },
+    "error": {
+      "output_unavailable": "That entity has no state right now, so its range cannot be read.",
+      "output_no_range": "That number entity does not expose usable minimum and maximum attributes.",
+      "output_already_used": "Another display on this device already writes to that entity.",
+      "same_min_max": "The value at needle zero and the value at full scale must differ.",
+      "preset_drives_nothing": "A preset must drive at least one display."
+    },
+    "abort": {
+      "invalid_configuration": "The configuration that was assembled is not valid."
+    }
+  },
+  "selector": {
+    "led_mode": {
+      "options": {
+        "preset": "Show the active preset's colour",
+        "gradient": "Colour by value",
+        "off": "Leave the LED off"
       }
     }
   }

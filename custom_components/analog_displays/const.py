@@ -20,6 +20,7 @@ CONF_OUTPUT_ENTITY_ID: Final = "output_entity_id"
 CONF_MIN_UPDATE_INTERVAL: Final = "min_update_interval"
 CONF_LED: Final = "led"
 
+CONF_ADD_ANOTHER: Final = "add_another"
 CONF_LABEL: Final = "label"
 CONF_ASSIGNMENTS: Final = "assignments"
 CONF_SOURCE_MODE: Final = "source_mode"
