@@ -12,15 +12,24 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.components.light import ATTR_RGB_COLOR
+from homeassistant.components.light.const import DOMAIN as LIGHT_DOMAIN
+from homeassistant.const import (
+    ATTR_ENTITY_ID,
+    SERVICE_TURN_OFF,
+    SERVICE_TURN_ON,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .backends import NormalizedValue
 from .backends.number_entity import NumberEntityBackend, UnknownOutputRangeError
-from .const import SOURCE_MODE_ENTITY
-from .models import Device, Display, Preset, PresetAssignment
+from .const import LED_MODE_GRADIENT, LED_MODE_PRESET, SOURCE_MODE_ENTITY
+from .led import resolve_colour
+from .models import Device, Display, Preset, PresetAssignment, RGBColor
 from .normalization import normalize
 from .repairs import async_clear_source_issue, async_raise_source_issue
 
@@ -53,6 +62,8 @@ class DisplayController:
         self._listeners: list[Callable[[], None]] = []
 
         self._last_value: NormalizedValue | None = None
+        self._last_colour: RGBColor | None = None
+        self._colour_written = False
         self._stale = False
         self._output_error_logged = False
 
@@ -187,6 +198,7 @@ class DisplayController:
             # No preset points here: this display is simply not in use.
             self._async_clear_stale()
             await self._write(NormalizedValue(normalized=0.0))
+            await self._async_update_led()
             self._notify()
             return
 
@@ -204,6 +216,7 @@ class DisplayController:
                 unit=unit,
             )
         )
+        await self._async_update_led()
         self._notify()
 
     @callback
@@ -246,6 +259,56 @@ class DisplayController:
         async_clear_source_issue(self.hass, self.entry_id, self.index)
         _LOGGER.info("Source for display %s recovered", self.display.name)
 
+    # --- indicator LED ------------------------------------------------------
+
+    def _resolve_colour(self) -> RGBColor | None:
+        """Work out what colour this display's LED should be showing."""
+        led = self.display.led
+        if led is None or led.mode not in (LED_MODE_PRESET, LED_MODE_GRADIENT):
+            return None
+
+        assignment = self.assignment
+        if assignment is None:
+            # Not in use under this preset: the LED goes dark with the needle.
+            return None
+
+        if led.mode == LED_MODE_PRESET:
+            return assignment.colour
+
+        value = self._last_value
+        if value is None:
+            return None
+        return resolve_colour(led.stops, value.normalized, led.fade)
+
+    async def _async_update_led(self) -> None:
+        """Push the resolved colour to the LED, skipping redundant calls."""
+        led = self.display.led
+        if led is None:
+            return
+
+        colour = self._resolve_colour()
+        if self._colour_written and colour == self._last_colour:
+            return
+
+        self._last_colour = colour
+        self._colour_written = True
+
+        if colour is None:
+            await self.hass.services.async_call(
+                LIGHT_DOMAIN,
+                SERVICE_TURN_OFF,
+                {ATTR_ENTITY_ID: led.light_entity_id},
+                blocking=True,
+            )
+            return
+
+        await self.hass.services.async_call(
+            LIGHT_DOMAIN,
+            SERVICE_TURN_ON,
+            {ATTR_ENTITY_ID: led.light_entity_id, ATTR_RGB_COLOR: list(colour)},
+            blocking=True,
+        )
+
     async def _write(self, value: NormalizedValue) -> None:
         """Hand a value to the output backend, tolerating a bad target."""
         try:
@@ -278,6 +341,7 @@ class DeviceRuntime:
         self.entry_id = entry_id
         self.device = device
         self.active_preset_index = device.active_preset_index
+        self._preset_listeners: list[Callable[[], None]] = []
         self.controllers = [
             DisplayController(self, index, display)
             for index, display in enumerate(device.displays)
@@ -289,6 +353,19 @@ class DeviceRuntime:
         if not self.device.presets:
             return None
         return self.device.presets[self.active_preset_index % len(self.device.presets)]
+
+    @callback
+    def async_add_preset_listener(
+        self, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        """Register a callback to run whenever the active preset changes."""
+        self._preset_listeners.append(listener)
+
+        @callback
+        def remove() -> None:
+            self._preset_listeners.remove(listener)
+
+        return remove
 
     async def async_start(self) -> None:
         """Start every display controller."""
@@ -313,3 +390,5 @@ class DeviceRuntime:
         self.active_preset_index = index % len(self.device.presets)
         for controller in self.controllers:
             await controller.async_preset_changed()
+        for listener in list(self._preset_listeners):
+            listener()

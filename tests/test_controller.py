@@ -295,9 +295,11 @@ async def test_the_led_is_not_used_to_signal_staleness(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
     """LEDs show the preset or the value, never an error."""
-    light_calls = async_mock_service(hass, "light", "turn_off")
+    off_calls = async_mock_service(hass, "light", "turn_off")
+    on_calls = async_mock_service(hass, "light", "turn_on")
     hass.states.async_set("sensor.solar", "1500")
-    hass.states.async_set("light.led_left", "on")
+    hass.states.async_set("light.led_left", "off")
+
     displays = device_options()["displays"]
     displays[0]["led"] = {
         "light_entity_id": "light.led_left",
@@ -305,12 +307,20 @@ async def test_the_led_is_not_used_to_signal_staleness(
         "stops": [],
         "fade": False,
     }
-    await _setup(hass, displays=displays)
+    presets = device_options()["presets"]
+    presets[0]["assignments"]["0"]["colour"] = [0, 255, 0]
+    await _setup(hass, displays=displays, presets=presets)
+
+    # The preset colour is showing.
+    assert on_calls[-1].data["rgb_color"] == [0, 255, 0]
+    off_calls.clear()
+    on_calls.clear()
 
     hass.states.async_set("sensor.solar", "unavailable")
     await settle(hass, freezer)
 
-    assert light_calls == []
+    assert off_calls == []
+    assert on_calls == []
 
 
 # --- listeners --------------------------------------------------------------

@@ -87,5 +87,25 @@
       "title": "{display} has lost its source",
       "description": "The {preset} preset points {display} on {device} at `{entity_id}`, which is unavailable, unknown or not numeric. The display is holding its last reading rather than dropping to zero.\n\nCheck that the entity still exists and that the integration providing it is loaded. This issue clears itself as soon as the source produces a value again."
     }
+  },
+  "entity": {
+    "select": {
+      "preset": {
+        "name": "Preset"
+      }
+    },
+    "sensor": {
+      "display_value": {
+        "name": "{display} value"
+      },
+      "display_normalized": {
+        "name": "{display} needle position"
+      }
+    },
+    "binary_sensor": {
+      "display_stale": {
+        "name": "{display} source stale"
+      }
+    }
   }
 }
