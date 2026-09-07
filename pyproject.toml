@@ -46,6 +46,8 @@ ignore = [
 # Parametrized tests legitimately take many positional arguments, and a
 # test's name is its description, so docstrings there are optional.
 "tests/*" = ["D100", "D103", "PLR0917", "PLR2004"]
+# A command-line script talks to the user on stdout; that is not debug output.
+"scripts/*" = ["T201"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["custom_components", "tests"]

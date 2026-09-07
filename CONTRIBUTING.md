@@ -36,8 +36,33 @@ ruff check . && ruff format --check . && mypy && pytest
 
 Test coverage must stay at or above 80%; CI enforces it.
 
-## Commits and releases
+## Commits
 
-Semantic versioning. `manifest.json`'s `version` must match the release tag —
-the release workflow fails the build if it does not. Add a `CHANGELOG.md`
-entry under `## [Unreleased]` with your change.
+Semantic versioning. Add a `CHANGELOG.md` entry under `## [Unreleased]`
+describing your change; a release cannot be cut from an empty section.
+
+## Cutting a release
+
+Home Assistant requires custom integrations to declare a `version` in
+`manifest.json`, and `release.yml` refuses to publish a release whose tag
+disagrees with it. The manifest is the source of truth, so bump it *before*
+tagging. One command moves the manifest and the changelog together:
+
+```bash
+git checkout -b release-0.2.0
+python scripts/bump_version.py 0.2.0
+ruff check . && ruff format --check . && mypy && pytest
+```
+
+Then open a PR, merge it, and publish a GitHub release **on `main`**:
+
+- **Tag: `0.2.0`, with no prefix.** The tag is created by publishing the
+  release. `v0.2.0` and `V0.2.0` are tolerated, but the published tags have no
+  prefix and the changelog links assume that.
+- The workflow verifies tag against manifest, builds
+  `custom_components/analog_displays` into `analog_displays.zip`, and attaches
+  it. HACS installs that zip, so it must stay flat with `manifest.json` at its
+  root.
+
+`pytest` fails locally if the manifest and changelog versions drift apart, so
+you should never reach a failed release run.
