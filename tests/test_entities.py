@@ -15,7 +15,7 @@ from pytest_homeassistant_custom_component.common import (
     mock_restore_cache,
 )
 
-from custom_components.analog_displays.const import DOMAIN
+from custom_components.analog_displays.const import CONFIG_VERSION, DOMAIN
 from tests.helpers import settle
 from tests.test_init import device_options
 
@@ -84,7 +84,11 @@ def _two_presets() -> list[dict[str, Any]]:
 
 async def _setup(hass: HomeAssistant, **overrides: Any) -> MockConfigEntry:
     entry = MockConfigEntry(
-        domain=DOMAIN, title="Meter Panel", data={}, options=device_options(**overrides)
+        domain=DOMAIN,
+        title="Meter Panel",
+        data={},
+        options=device_options(**overrides),
+        version=CONFIG_VERSION,
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -263,16 +267,22 @@ async def test_a_stale_restored_preset_is_ignored(hass: HomeAssistant) -> None:
 # --- LEDs -------------------------------------------------------------------
 
 
-def _with_led(mode: str, **led: Any) -> list[dict[str, Any]]:
+def _with_led(mode: str = "preset", **led: Any) -> list[dict[str, Any]]:
+    """Bind a light to display 0. How it behaves lives on the assignment."""
     displays = device_options()["displays"]
-    displays[0]["led"] = {
-        "light_entity_id": "light.led_left",
-        "mode": mode,
-        "stops": [],
-        "fade": False,
-        **led,
-    }
+    displays[0]["light_entity_id"] = "light.led_left"
     return displays
+
+
+def _led_behaviour(
+    presets: list[dict[str, Any]], mode: str, **led: Any
+) -> list[dict[str, Any]]:
+    """Set LED mode, fade and zones on display 0 of every preset."""
+    for preset in presets:
+        assignment = preset["assignments"].get("0")
+        if assignment is not None:
+            assignment.update({"mode": mode, "fade": False, "stops": [], **led})
+    return presets
 
 
 async def test_preset_mode_shows_the_presets_colour(
@@ -280,7 +290,11 @@ async def test_preset_mode_shows_the_presets_colour(
 ) -> None:
     hass.states.async_set("sensor.solar", "1500")
     hass.states.async_set("sensor.grid", "0")
-    await _setup(hass, displays=_with_led("preset"), presets=_two_presets())
+    await _setup(
+        hass,
+        displays=_with_led(),
+        presets=_led_behaviour(_two_presets(), "preset"),
+    )
 
     assert light_on[-1].data["rgb_color"] == [0, 255, 0]
 
@@ -300,19 +314,19 @@ async def test_gradient_mode_colours_by_value(
 ) -> None:
     """Stops are on the normalized scale, so they survive a preset change."""
     hass.states.async_set("sensor.solar", "2700")  # 0.9 of 0-3000
-    displays = _with_led(
+    presets = _led_behaviour(
+        [device_options()["presets"][0]],
         "gradient",
         stops=[
-            {"at": 0.2, "colour": [255, 0, 0], "end": None},
-            {"at": 0.8, "colour": [0, 255, 0], "end": None},
+            {"at": 600.0, "colour": [255, 0, 0], "end": None},
+            {"at": 2400.0, "colour": [0, 255, 0], "end": None},
         ],
-        fade=False,
     )
-    await _setup(hass, displays=displays)
+    await _setup(hass, displays=_with_led(), presets=presets)
 
     assert light_on[-1].data["rgb_color"] == [0, 255, 0]
 
-    hass.states.async_set("sensor.solar", "1200")  # 0.4
+    hass.states.async_set("sensor.solar", "1200")  # below the 2400 W stop
     await settle(hass, freezer)
     assert light_on[-1].data["rgb_color"] == [255, 0, 0]
 
@@ -321,15 +335,16 @@ async def test_gradient_mode_blends_when_fading(
     hass: HomeAssistant, light_on: list[ServiceCall]
 ) -> None:
     hass.states.async_set("sensor.solar", "1500")  # 0.5, halfway between stops
-    displays = _with_led(
+    presets = _led_behaviour(
+        [device_options()["presets"][0]],
         "gradient",
         stops=[
             {"at": 0.0, "colour": [0, 0, 0], "end": None},
-            {"at": 1.0, "colour": [100, 200, 50], "end": None},
+            {"at": 3000.0, "colour": [100, 200, 50], "end": None},
         ],
         fade=True,
     )
-    await _setup(hass, displays=displays)
+    await _setup(hass, displays=_with_led(), presets=presets)
 
     assert light_on[-1].data["rgb_color"] == [50, 100, 25]
 
@@ -338,11 +353,12 @@ async def test_below_the_first_stop_the_led_is_turned_off(
     hass: HomeAssistant, light_off: list[ServiceCall]
 ) -> None:
     hass.states.async_set("sensor.solar", "150")  # 0.05, below the first stop
-    displays = _with_led(
+    presets = _led_behaviour(
+        [device_options()["presets"][0]],
         "gradient",
-        stops=[{"at": 0.2, "colour": [255, 0, 0], "end": None}],
+        stops=[{"at": 600.0, "colour": [255, 0, 0], "end": None}],
     )
-    await _setup(hass, displays=displays)
+    await _setup(hass, displays=_with_led(), presets=presets)
 
     assert len(light_off) == 1
 
@@ -355,7 +371,11 @@ async def test_led_mode_off_darkens_the_light_and_leaves_it_alone(
 ) -> None:
     """Mode "off" promises a dark LED, so it is darkened once and then left."""
     hass.states.async_set("sensor.solar", "1500")
-    await _setup(hass, displays=_with_led("off"))
+    await _setup(
+        hass,
+        displays=_with_led(),
+        presets=_led_behaviour([device_options()["presets"][0]], "off"),
+    )
 
     assert light_on == []
     assert len(light_off) == 1
@@ -372,18 +392,159 @@ async def test_redundant_colour_writes_are_skipped(
 ) -> None:
     """Two readings in the same colour band must not re-send the colour."""
     hass.states.async_set("sensor.solar", "2700")
-    displays = _with_led(
+    presets = _led_behaviour(
+        [device_options()["presets"][0]],
         "gradient",
         stops=[
-            {"at": 0.2, "colour": [255, 0, 0], "end": None},
-            {"at": 0.8, "colour": [0, 255, 0], "end": None},
+            {"at": 600.0, "colour": [255, 0, 0], "end": None},
+            {"at": 2400.0, "colour": [0, 255, 0], "end": None},
         ],
-        fade=False,
     )
-    await _setup(hass, displays=displays)
+    await _setup(hass, displays=_with_led(), presets=presets)
     assert len(light_on) == 1
 
     hass.states.async_set("sensor.solar", "2900")
     await settle(hass, freezer)
 
     assert len(light_on) == 1
+
+
+# --- real-unit scales and conversion ----------------------------------------
+
+
+def _power_preset(unit: str | None, low: float, high: float) -> list[dict[str, Any]]:
+    """Build a preset reading a watt sensor against a range in `unit`."""
+    return [
+        {
+            "label": "Power",
+            "assignments": {
+                "0": {
+                    "source_mode": "entity",
+                    "source_entity_id": "sensor.solar",
+                    "unit": unit,
+                    "min_value": low,
+                    "max_value": high,
+                    "colour": None,
+                }
+            },
+        }
+    ]
+
+
+async def test_a_watt_sensor_on_a_kilowatt_scale(hass: HomeAssistant) -> None:
+    """The whole point: 1500 W on a 0-10 kW meter is 15 %, not full scale."""
+    calls = async_mock_service(hass, "number", "set_value")
+    hass.states.async_set(
+        "sensor.solar", "1500", {"unit_of_measurement": "W", "device_class": "power"}
+    )
+
+    await _setup(hass, presets=_power_preset("kW", 0.0, 10.0))
+
+    assert calls[-1].data["value"] == pytest.approx(0.15)
+
+
+async def test_without_a_unit_the_reading_is_taken_as_is(hass: HomeAssistant) -> None:
+    """Leaving the unit blank keeps the pre-conversion behaviour."""
+    calls = async_mock_service(hass, "number", "set_value")
+    hass.states.async_set("sensor.solar", "1500", {"unit_of_measurement": "W"})
+
+    await _setup(hass, presets=_power_preset(None, 0.0, 3000.0))
+
+    assert calls[-1].data["value"] == pytest.approx(0.5)
+
+
+async def test_an_impossible_conversion_holds_the_needle(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    """Better a held needle than a confidently wrong one."""
+    calls = async_mock_service(hass, "number", "set_value")
+    hass.states.async_set(
+        "sensor.solar", "1500", {"unit_of_measurement": "W", "device_class": "power"}
+    )
+    entry = await _setup(hass, presets=_power_preset("°C", -10.0, 40.0))
+
+    assert calls == []
+    assert entry.runtime_data.controllers[0].stale is True
+
+
+async def test_thresholds_are_read_in_the_displays_own_unit(
+    hass: HomeAssistant, light_on: list[ServiceCall], freezer: FrozenDateTimeFactory
+) -> None:
+    """Red below 2 kW, green above 8 kW, on a 0-10 kW meter fed in watts."""
+    hass.states.async_set(
+        "sensor.solar", "9000", {"unit_of_measurement": "W", "device_class": "power"}
+    )
+    presets = _power_preset("kW", 0.0, 10.0)
+    presets[0]["assignments"]["0"] |= {
+        "mode": "gradient",
+        "fade": False,
+        "stops": [
+            {"at": 2.0, "colour": [255, 0, 0], "end": None},
+            {"at": 8.0, "colour": [0, 255, 0], "end": None},
+        ],
+    }
+    await _setup(hass, displays=_with_led(), presets=presets)
+
+    # 9 kW is above the 8 kW stop.
+    assert light_on[-1].data["rgb_color"] == [0, 255, 0]
+
+    hass.states.async_set(
+        "sensor.solar", "4000", {"unit_of_measurement": "W", "device_class": "power"}
+    )
+    await settle(hass, freezer)
+
+    # 4 kW is above 2 but below 8.
+    assert light_on[-1].data["rgb_color"] == [255, 0, 0]
+
+
+# --- preset change blink ----------------------------------------------------
+
+
+async def test_switching_preset_blinks_the_feedback_colour(
+    hass: HomeAssistant, light_on: list[ServiceCall], light_off: list[ServiceCall]
+) -> None:
+    """Confirms a preset change on a board with no screen."""
+    hass.states.async_set("sensor.solar", "1500")
+    hass.states.async_set("sensor.grid", "3000")
+    presets = _two_presets()
+    presets[1]["feedback_colour"] = [255, 255, 0]
+
+    await _setup(hass, displays=_with_led(), presets=_led_behaviour(presets, "preset"))
+    light_on.clear()
+    light_off.clear()
+
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": SELECT, "option": "Grid"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    blinks = [call for call in light_on if call.data["rgb_color"] == [255, 255, 0]]
+    assert len(blinks) == 2, "two flashes reads as deliberate, one reads as a glitch"
+    # It settles on the new preset's own colour, not the feedback colour.
+    assert light_on[-1].data["rgb_color"] == [0, 0, 255]
+
+
+async def test_a_preset_without_a_feedback_colour_does_not_blink(
+    hass: HomeAssistant, light_on: list[ServiceCall]
+) -> None:
+    hass.states.async_set("sensor.solar", "1500")
+    hass.states.async_set("sensor.grid", "3000")
+
+    await _setup(
+        hass, displays=_with_led(), presets=_led_behaviour(_two_presets(), "preset")
+    )
+    light_on.clear()
+
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": SELECT, "option": "Grid"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    # Exactly one write: the new preset's colour, no flashes.
+    assert [call.data["rgb_color"] for call in light_on] == [[0, 0, 255]]

@@ -15,7 +15,6 @@ from custom_components.analog_displays.models import (
     Device,
     Display,
     HardwareProfile,
-    LedConfig,
     Preset,
     PresetAssignment,
 )
@@ -30,12 +29,7 @@ def _device(**overrides: Any) -> Device:
             Display(
                 name="Right",
                 output_entity_id="number.right",
-                led=LedConfig(
-                    light_entity_id="light.right",
-                    mode="gradient",
-                    stops=[ColourStop(at=0.2, colour=(255, 0, 0))],
-                    fade=True,
-                ),
+                light_entity_id="light.right",
             ),
         ],
         "presets": [
@@ -44,9 +38,13 @@ def _device(**overrides: Any) -> Device:
                 assignments={
                     0: PresetAssignment(
                         source_entity_id="sensor.solar",
+                        unit="W",
                         min_value=0.0,
                         max_value=3000.0,
                         colour=(0, 255, 0),
+                        led_mode="gradient",
+                        fade=True,
+                        stops=[ColourStop(at=600.0, colour=(255, 0, 0))],
                     ),
                     1: PresetAssignment(
                         source_entity_id="sensor.grid",
@@ -232,43 +230,56 @@ def test_assignment_validation_rejects(
 
 
 @pytest.mark.parametrize(
-    ("led", "match"),
+    ("assignment", "match"),
     [
-        (LedConfig(light_entity_id="", mode="preset"), "a light entity is required"),
-        (LedConfig(light_entity_id="light.x", mode="disco"), "unknown LED mode"),
         (
-            LedConfig(light_entity_id="light.x", mode="gradient"),
-            "at least one colour stop",
+            PresetAssignment(source_entity_id="sensor.x", led_mode="disco"),
+            "unknown LED mode",
         ),
         (
-            LedConfig(
-                light_entity_id="light.x",
-                mode="gradient",
-                stops=[ColourStop(at=1.5, colour=(1, 2, 3))],
-            ),
-            "stop position must be 0.0-1.0",
+            PresetAssignment(source_entity_id="sensor.x", led_mode="gradient"),
+            "at least one LED zone",
         ),
         (
-            LedConfig(
-                light_entity_id="light.x",
-                mode="gradient",
-                stops=[ColourStop(at=0.5, colour=(1, 2, 3), end=0.4)],
+            PresetAssignment(
+                source_entity_id="sensor.x",
+                led_mode="gradient",
+                stops=[ColourStop(at=50.0, colour=(1, 2, 3), end=40.0)],
             ),
-            "stop end must be above its position",
-        ),
-        (
-            LedConfig(
-                light_entity_id="light.x",
-                mode="gradient",
-                stops=[ColourStop(at=0.5, colour=(1, 2, 3), end=1.4)],
-            ),
-            "stop end must be 0.0-1.0",
+            "zone 0: stop end must be above its position",
         ),
     ],
 )
-def test_led_validation_rejects(led: LedConfig, match: str) -> None:
+def test_led_behaviour_validation_rejects(
+    assignment: PresetAssignment, match: str
+) -> None:
+    """LED behaviour lives on the assignment, where the range and unit are."""
     with pytest.raises(AnalogDisplaysConfigError, match=match):
-        led.validate("led")
+        assignment.validate("assignment")
+
+
+def test_zone_positions_are_in_real_units_not_a_fraction() -> None:
+    """A zone at 2 kW on a 0-10 kW display is written as 2.0, not 0.2."""
+    assignment = PresetAssignment(
+        source_entity_id="sensor.power",
+        unit="kW",
+        min_value=0.0,
+        max_value=10.0,
+        led_mode="gradient",
+        stops=[ColourStop(at=2.0, colour=(255, 0, 0))],
+    )
+    assignment.validate("assignment")
+
+    assert assignment.stops[0].at == 2.0
+
+
+def test_feedback_colour_round_trips() -> None:
+    preset = Preset(
+        label="Power",
+        assignments={0: PresetAssignment(source_entity_id="sensor.x")},
+        feedback_colour=(0, 0, 255),
+    )
+    assert Preset.from_dict(preset.to_dict()).feedback_colour == (0, 0, 255)
 
 
 @pytest.mark.parametrize(

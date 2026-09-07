@@ -3,9 +3,11 @@
     "step": {
       "user": {
         "title": "Analoge meters",
-        "description": "Geef dit apparaat een naam. Eén configuratie-item staat voor één fysiek bord.",
+        "description": "Geef dit apparaat een naam en geef aan hoeveel meters en knoppen het heeft. Eén configuratie-item staat voor één fysiek bord.",
         "data": {
-          "name": "Apparaatnaam"
+          "name": "Apparaatnaam",
+          "display_count": "Aantal meters",
+          "button_count": "Aantal knoppen"
         }
       },
       "hardware": {
@@ -28,8 +30,7 @@
         "description": "Welke GPIO stuurt meter {index} aan, en heeft die een indicatie-led?",
         "data": {
           "pin": "Uitgangs-GPIO",
-          "led_kind": "Indicatie-led",
-          "add_another": "Nog een meter toevoegen"
+          "led_kind": "Indicatie-led"
         }
       },
       "leds_hw": {
@@ -45,11 +46,10 @@
       },
       "buttons_hw": {
         "title": "Knop {index}",
-        "description": "Welke GPIO leest knop {index} uit? Laat leeg om af te ronden. Knoppen horen bij het hele apparaat, niet bij één meter.",
+        "description": "Welke GPIO leest knop {index} uit? Knoppen horen bij het hele apparaat, niet bij één meter.",
         "data": {
           "pin": "Knop-GPIO",
-          "multi_click": "Enkele, dubbele en lange drukken herkennen",
-          "add_another": "Nog een knop toevoegen"
+          "multi_click": "Enkele, dubbele en lange drukken herkennen"
         }
       },
       "yaml_result": {
@@ -63,21 +63,22 @@
           "name": "Naam van de meter",
           "output_entity_id": "Number-entiteit als uitgang",
           "light_entity_id": "Indicatie-led (optioneel)",
-          "mode": "Led-modus",
-          "fade": "Led-kleuren tussen stops mengen",
-          "min_update_interval": "Minimale updateperiode",
-          "add_another": "Nog een meter toevoegen"
+          "min_update_interval": "Minimale updateperiode"
         },
         "data_description": {
           "min_update_interval": "Snelle updates van de bron worden samengevoegd tot hooguit één schrijfactie per periode, wat het meetwerk spaart.",
-          "fade": "Zonder mengen springt de led bij elke stop hard naar de volgende kleur."
+          "light_entity_id": "Welke lamp deze meter aanstuurt. Welke kleur hij toont stel je per voorkeuze in, samen met de schaal van die voorkeuze."
         }
       },
       "preset": {
         "title": "Voorkeuze {index}",
         "description": "Een voorkeuze is een scène over het hele apparaat: hij bepaalt wat elke meter tegelijk laat zien.",
         "data": {
-          "label": "Naam van de voorkeuze"
+          "label": "Naam van de voorkeuze",
+          "feedback_colour": "Knipperkleur bij omschakelen"
+        },
+        "data_description": {
+          "feedback_colour": "Elke meter die deze voorkeuze aanstuurt knippert twee keer in deze kleur en gaat daarna terug naar normaal. Leeg laten om niet te knipperen."
         }
       },
       "preset_assign": {
@@ -89,13 +90,19 @@
           "statistic_entity_id": "Statistiek",
           "statistic_type": "Soort statistiek",
           "statistic_period": "Periode van de statistiek",
+          "unit": "Eenheid van de meter",
           "min_value": "Waarde bij naald op nul",
           "max_value": "Waarde bij volle uitslag",
-          "colour": "Led-kleur voor deze voorkeuze"
+          "colour": "Led-kleur voor deze voorkeuze",
+          "mode": "Led-modus",
+          "fade": "Led-kleuren tussen zones mengen",
+          "zone_count": "Aantal led-zones"
         },
         "data_description": {
-          "min_value": "De kalibratie hoort bij de voorkeuze, dus dezelfde meter kan onder elke voorkeuze een ander bereik dekken.",
-          "source_mode": "Live entiteiten pushen updates. Statistieken worden opgevraagd en vereisen de recorder."
+          "unit": "De eenheid waarin deze meter geijkt is, bijvoorbeeld kW. De bron wordt hiernaar omgerekend, dus een sensor in W werkt op een schaal in kW. Leeg laten om de eigen eenheid van de bron ongewijzigd te gebruiken.",
+          "min_value": "De kalibratie hoort bij de voorkeuze, dus dezelfde meter kan onder elke voorkeuze een ander bereik en een andere eenheid dekken.",
+          "source_mode": "Live entiteiten pushen updates. Statistieken worden opgevraagd en vereisen de recorder.",
+          "zone_count": "Hoeveel kleurzones de led heeft. Elke zone krijgt een eigen pagina, in de eenheid hierboven."
         }
       },
       "preset_done": {
@@ -104,6 +111,15 @@
         "menu_options": {
           "preset": "Nog een voorkeuze toevoegen",
           "finish": "Afronden"
+        }
+      },
+      "preset_zone": {
+        "title": "{display}: led-zone {index} van {count}",
+        "description": "De waarde in {unit} vanaf waar deze kleur geldt. Geef een eindwaarde om de led daarboven donker te laten tot de volgende zone begint.",
+        "data": {
+          "at": "Vanaf waarde",
+          "colour": "Kleur",
+          "end": "Tot waarde (optioneel)"
         }
       }
     },
@@ -117,7 +133,9 @@
       "pin_duplicate": "Die pin is al in gebruik op dit bord.",
       "pin_unsafe": "Die pin is gereserveerd voor flash of wordt bij het opstarten uitgelezen, en is dus niet bruikbaar.",
       "pin_not_output_capable": "Die pin kan alleen lezen en kan geen meter of led aansturen.",
-      "pin_not_on_board": "Die pin bestaat niet op dit bord."
+      "pin_not_on_board": "Die pin bestaat niet op dit bord.",
+      "incompatible_unit": "Die bron is niet in die eenheid uit te lezen. Controleer of de eenheid past bij het soort grootheid dat de sensor levert.",
+      "source_not_numeric": "De status van die entiteit is geen getal."
     },
     "abort": {
       "invalid_configuration": "De samengestelde configuratie is niet geldig."
@@ -142,8 +160,6 @@
           "name": "Naam van de meter",
           "output_entity_id": "Number-entiteit als uitgang",
           "light_entity_id": "Indicatie-led (optioneel)",
-          "mode": "Led-modus",
-          "fade": "Led-kleuren tussen stops mengen",
           "min_update_interval": "Minimale updateperiode"
         }
       },
@@ -151,7 +167,8 @@
         "title": "Voorkeuze {index}",
         "description": "Een voorkeuze is een scène over het hele apparaat: hij bepaalt wat elke meter tegelijk laat zien.",
         "data": {
-          "label": "Naam van de voorkeuze"
+          "label": "Naam van de voorkeuze",
+          "feedback_colour": "Knipperkleur bij omschakelen"
         }
       },
       "edit_assignment": {
@@ -163,13 +180,19 @@
           "statistic_entity_id": "Statistiek",
           "statistic_type": "Soort statistiek",
           "statistic_period": "Periode van de statistiek",
+          "unit": "Eenheid van de meter",
           "min_value": "Waarde bij naald op nul",
           "max_value": "Waarde bij volle uitslag",
-          "colour": "Led-kleur voor deze voorkeuze"
+          "colour": "Led-kleur voor deze voorkeuze",
+          "mode": "Led-modus",
+          "fade": "Led-kleuren tussen zones mengen",
+          "zone_count": "Aantal led-zones"
         },
         "data_description": {
-          "min_value": "De kalibratie hoort bij de voorkeuze, dus dezelfde meter kan onder elke voorkeuze een ander bereik dekken.",
-          "source_mode": "Live entiteiten pushen updates. Statistieken worden opgevraagd en vereisen de recorder."
+          "unit": "De eenheid waarin deze meter geijkt is, bijvoorbeeld kW. De bron wordt hiernaar omgerekend, dus een sensor in W werkt op een schaal in kW. Leeg laten om de eigen eenheid van de bron ongewijzigd te gebruiken.",
+          "min_value": "De kalibratie hoort bij de voorkeuze, dus dezelfde meter kan onder elke voorkeuze een ander bereik en een andere eenheid dekken.",
+          "source_mode": "Live entiteiten pushen updates. Statistieken worden opgevraagd en vereisen de recorder.",
+          "zone_count": "Hoeveel kleurzones de led heeft. Elke zone krijgt een eigen pagina, in de eenheid hierboven."
         }
       },
       "remove_preset": {
@@ -200,7 +223,9 @@
       "pin_duplicate": "Die pin is al in gebruik op dit bord.",
       "pin_unsafe": "Die pin is gereserveerd voor flash of wordt bij het opstarten uitgelezen, en is dus niet bruikbaar.",
       "pin_not_output_capable": "Die pin kan alleen lezen en kan geen meter of led aansturen.",
-      "pin_not_on_board": "Die pin bestaat niet op dit bord."
+      "pin_not_on_board": "Die pin bestaat niet op dit bord.",
+      "incompatible_unit": "Die bron is niet in die eenheid uit te lezen. Controleer of de eenheid past bij het soort grootheid dat de sensor levert.",
+      "source_not_numeric": "De status van die entiteit is geen getal."
     },
     "abort": {
       "invalid_configuration": "De samengestelde configuratie is niet geldig.",

@@ -10,6 +10,8 @@ DOMAIN: Final = "analog_displays"
 
 CONF_NAME: Final = "name"
 CONF_DISPLAYS: Final = "displays"
+CONF_DISPLAY_COUNT: Final = "display_count"
+CONF_BUTTON_COUNT: Final = "button_count"
 CONF_PRESETS: Final = "presets"
 CONF_BUTTONS: Final = "buttons"
 CONF_ACTIVE_PRESET_INDEX: Final = "active_preset_index"
@@ -19,6 +21,7 @@ CONF_STATISTICS_INTERVAL: Final = "statistics_interval"
 CONF_OUTPUT_ENTITY_ID: Final = "output_entity_id"
 CONF_MIN_UPDATE_INTERVAL: Final = "min_update_interval"
 CONF_LED: Final = "led"
+CONF_UNIT: Final = "unit"
 
 CONF_ADD_ANOTHER: Final = "add_another"
 CONF_LABEL: Final = "label"
@@ -31,6 +34,7 @@ CONF_STATISTIC_PERIOD: Final = "statistic_period"
 CONF_MIN_VALUE: Final = "min_value"
 CONF_MAX_VALUE: Final = "max_value"
 CONF_COLOUR: Final = "colour"
+CONF_FEEDBACK_COLOUR: Final = "feedback_colour"
 
 CONF_LIGHT_ENTITY_ID: Final = "light_entity_id"
 CONF_MODE: Final = "mode"
@@ -73,6 +77,9 @@ BUTTON_ACTIONS: Final = (
 )
 
 # --- Defaults and limits ---------------------------------------------------
+
+#: Config entry schema version. Bumped when stored options change shape.
+CONFIG_VERSION: Final = 2
 
 MAX_RGB_CHANNEL: Final = 255
 
