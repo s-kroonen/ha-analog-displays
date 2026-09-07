@@ -11,7 +11,7 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.analog_displays.const import DOMAIN
+from custom_components.analog_displays.const import CONFIG_VERSION, DOMAIN
 from custom_components.analog_displays.diagnostics import (
     async_get_config_entry_diagnostics,
 )
@@ -39,6 +39,7 @@ async def _setup(hass: HomeAssistant, **overrides: Any) -> MockConfigEntry:
         title="Meter Panel",
         data={},
         options=device_options(**({"presets": _presets()} | overrides)),
+        version=CONFIG_VERSION,
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)

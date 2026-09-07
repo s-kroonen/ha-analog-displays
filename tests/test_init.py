@@ -13,7 +13,7 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.analog_displays.const import DOMAIN
+from custom_components.analog_displays.const import CONFIG_VERSION, DOMAIN
 from tests.helpers import settle
 
 
@@ -25,7 +25,7 @@ def device_options(**overrides: Any) -> dict[str, Any]:
             {
                 "name": "Left",
                 "output_entity_id": "number.meter_left",
-                "led": None,
+                "light_entity_id": None,
                 "min_update_interval": 5.0,
             }
         ],
@@ -66,7 +66,11 @@ def output(hass: HomeAssistant) -> None:
 
 async def _setup(hass: HomeAssistant, **overrides: Any) -> MockConfigEntry:
     entry = MockConfigEntry(
-        domain=DOMAIN, title="Meter Panel", data={}, options=device_options(**overrides)
+        domain=DOMAIN,
+        title="Meter Panel",
+        data={},
+        options=device_options(**overrides),
+        version=CONFIG_VERSION,
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -198,7 +202,11 @@ async def test_unassigned_display_is_driven_to_zero(
 async def test_invalid_stored_options_are_not_ready(hass: HomeAssistant) -> None:
     """Corrupt options must not load a half-configured entry."""
     entry = MockConfigEntry(
-        domain=DOMAIN, title="Broken", data={}, options={"name": "Broken"}
+        domain=DOMAIN,
+        title="Broken",
+        data={},
+        options={"name": "Broken"},
+        version=CONFIG_VERSION,
     )
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
@@ -225,7 +233,11 @@ async def test_a_failing_write_does_not_take_the_entry_down(
     hass.states.async_set("sensor.solar", "1500")
 
     entry = MockConfigEntry(
-        domain=DOMAIN, title="Meter Panel", data={}, options=device_options()
+        domain=DOMAIN,
+        title="Meter Panel",
+        data={},
+        options=device_options(),
+        version=CONFIG_VERSION,
     )
     entry.add_to_hass(hass)
 

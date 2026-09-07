@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Value ranges now carry a unit, and the source is converted into it.** A
+  sensor reporting watts against a display calibrated in kilowatts previously
+  read a thousand times high with nothing to indicate anything was wrong.
+  Conversion uses Home Assistant's own converters, covering power, energy,
+  temperature, data size and rate, duration, pressure, distance, speed and
+  more. Leaving the unit empty keeps the old behaviour of reading the source
+  as-is, and a conversion that cannot be done holds the needle rather than
+  displaying a wrong number.
+- **LED behaviour moved from the display onto each preset assignment**, so
+  thresholds can be written in real units — "red from 2 kW" rather than "red
+  from 0.2 of full scale". A display-level threshold in kW would have been
+  meaningless under a preset showing degrees. The display still owns which
+  light it drives.
+- **The config flow asks how many displays and buttons up front** instead of
+  chaining "add another" checkboxes, since those are facts about the device.
+- Source entities widened beyond sensors to include numbers, input numbers and
+  counters, with a check that the chosen entity's state is actually numeric.
+
+Existing configurations are migrated automatically and keep behaving exactly as
+they did: old threshold positions are converted from fractions into real values
+against the range they belong to, and no unit conversion is introduced.
+
+### Added
+
+- **LED zones are configurable at last.** Earlier versions seeded a single
+  hard-coded stop and had no editor for it anywhere, despite a comment claiming
+  otherwise.
+- **Presets can blink for confirmation.** Give a preset a colour and every
+  display it drives flashes twice on activation, then returns to normal —
+  useful on a board with no screen.
+
 ### Fixed
 
 - Release tags spelled with a capital `V` no longer fail the version check.

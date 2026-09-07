@@ -9,8 +9,9 @@ pointless and shortens its life.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.light import ATTR_RGB_COLOR
 from homeassistant.components.light.const import DOMAIN as LIGHT_DOMAIN
@@ -37,9 +38,17 @@ from .const import (
 )
 from .coordinator import StatisticsCoordinator
 from .led import resolve_colour
-from .models import Device, Display, Preset, PresetAssignment, RGBColor
+from .models import (
+    ColourStop,
+    Device,
+    Display,
+    Preset,
+    PresetAssignment,
+    RGBColor,
+)
 from .normalization import normalize
 from .repairs import async_clear_source_issue, async_raise_source_issue
+from .units import convert
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -47,6 +56,10 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 _NON_NUMERIC = (STATE_UNAVAILABLE, STATE_UNKNOWN, None, "")
+
+#: Two flashes reads as deliberate feedback rather than a glitch.
+BLINK_COUNT = 2
+BLINK_INTERVAL = 0.2
 
 
 class DisplayController:
@@ -74,6 +87,7 @@ class DisplayController:
         self._colour_written = False
         self._stale = False
         self._output_error_logged = False
+        self._light_error_logged = False
 
         # Trailing edge, not leading: coalesce a burst of source updates and
         # write the newest value once the burst settles, so the needle ends up
@@ -201,7 +215,11 @@ class DisplayController:
         except (TypeError, ValueError):
             return None
 
-        return raw, state.attributes.get("unit_of_measurement")
+        return self._to_display_unit(
+            raw,
+            state.attributes.get("unit_of_measurement"),
+            state.attributes.get("device_class"),
+        )
 
     def _read_statistic(
         self, assignment: PresetAssignment
@@ -223,7 +241,45 @@ class DisplayController:
             if state is not None:
                 unit = state.attributes.get("unit_of_measurement")
 
-        return value, unit
+        device_class: str | None = None
+        if assignment.statistic_entity_id:
+            state = self.hass.states.get(assignment.statistic_entity_id)
+            if state is not None:
+                device_class = state.attributes.get("device_class")
+
+        return self._to_display_unit(value, unit, device_class)
+
+    def _to_display_unit(
+        self, raw: float, source_unit: str | None, device_class: str | None
+    ) -> tuple[float, str | None] | None:
+        """Express a reading in the unit this assignment is calibrated in.
+
+        A sensor publishing watts against a range typed in kilowatts is wrong
+        by a factor of a thousand, so a conversion that cannot be done reads as
+        no reading at all: the needle holds and the repair issue explains why,
+        rather than the display confidently showing nonsense.
+        """
+        assignment = self.assignment
+        if assignment is None:
+            return raw, source_unit
+
+        target = assignment.unit
+        if target is None or source_unit == target:
+            return raw, source_unit
+
+        converted = convert(raw, source_unit, target, device_class)
+        if converted is None:
+            _LOGGER.error(
+                "Display %s is calibrated in %s but %s reports %s, which cannot "
+                "be converted",
+                self.display.name,
+                target,
+                self.source_entity_id or assignment.statistic_entity_id,
+                source_unit or "no unit",
+            )
+            return None
+
+        return converted, target
 
     async def async_refresh(self) -> None:
         """Re-read the source and write the result to the display."""
@@ -295,10 +351,27 @@ class DisplayController:
 
     # --- indicator LED ------------------------------------------------------
 
+    def _normalized_stops(self, assignment: PresetAssignment) -> list[ColourStop]:
+        """Convert real-unit zone positions onto the 0.0-1.0 scale.
+
+        Thresholds are configured the way a person describes a meter — "red
+        from 2 kW" — while :func:`.led.resolve_colour` works purely in
+        normalized space. Converting here keeps that function, and its tests,
+        entirely unaware of units.
+        """
+        low, high = assignment.min_value, assignment.max_value
+        return [
+            ColourStop(
+                at=normalize(stop.at, low, high),
+                colour=stop.colour,
+                end=None if stop.end is None else normalize(stop.end, low, high),
+            )
+            for stop in assignment.stops
+        ]
+
     def _resolve_colour(self) -> RGBColor | None:
         """Work out what colour this display's LED should be showing."""
-        led = self.display.led
-        if led is None or led.mode not in (LED_MODE_PRESET, LED_MODE_GRADIENT):
+        if self.display.light_entity_id is None:
             return None
 
         assignment = self.assignment
@@ -306,18 +379,51 @@ class DisplayController:
             # Not in use under this preset: the LED goes dark with the needle.
             return None
 
-        if led.mode == LED_MODE_PRESET:
+        if assignment.led_mode == LED_MODE_PRESET:
             return assignment.colour
+        if assignment.led_mode != LED_MODE_GRADIENT:
+            return None
 
         value = self._last_value
         if value is None:
             return None
-        return resolve_colour(led.stops, value.normalized, led.fade)
+        return resolve_colour(
+            self._normalized_stops(assignment), value.normalized, assignment.fade
+        )
+
+    async def _async_set_light(self, colour: RGBColor | None) -> None:
+        """Drive the indicator LED to a colour, or turn it off.
+
+        An unreachable LED must not take the config entry down with it, and
+        must not stop the needle moving: the meter is the point, the LED is
+        decoration.
+        """
+        light = self.display.light_entity_id
+        if light is None:
+            return
+
+        service = SERVICE_TURN_OFF if colour is None else SERVICE_TURN_ON
+        data: dict[str, Any] = {ATTR_ENTITY_ID: light}
+        if colour is not None:
+            data[ATTR_RGB_COLOR] = list(colour)
+
+        try:
+            await self.hass.services.async_call(
+                LIGHT_DOMAIN, service, data, blocking=True
+            )
+        except HomeAssistantError as err:
+            if not self._light_error_logged:
+                self._light_error_logged = True
+                _LOGGER.error(  # noqa: TRY400 - a traceback per write is noise
+                    "Cannot drive the indicator LED %s: %s", light, err
+                )
+            return
+
+        self._light_error_logged = False
 
     async def _async_update_led(self) -> None:
         """Push the resolved colour to the LED, skipping redundant calls."""
-        led = self.display.led
-        if led is None:
+        if self.display.light_entity_id is None:
             return
 
         colour = self._resolve_colour()
@@ -326,22 +432,29 @@ class DisplayController:
 
         self._last_colour = colour
         self._colour_written = True
+        await self._async_set_light(colour)
 
-        if colour is None:
-            await self.hass.services.async_call(
-                LIGHT_DOMAIN,
-                SERVICE_TURN_OFF,
-                {ATTR_ENTITY_ID: led.light_entity_id},
-                blocking=True,
-            )
+    async def async_blink(self, colour: RGBColor) -> None:
+        """Blink ``colour`` twice, then settle back to the resolved colour.
+
+        Used to confirm a preset change on a board with no screen. The final
+        state is re-resolved rather than restored from a snapshot, so a source
+        update landing mid-blink still leaves the LED showing the truth.
+        """
+        if self.display.light_entity_id is None or self.assignment is None:
             return
 
-        await self.hass.services.async_call(
-            LIGHT_DOMAIN,
-            SERVICE_TURN_ON,
-            {ATTR_ENTITY_ID: led.light_entity_id, ATTR_RGB_COLOR: list(colour)},
-            blocking=True,
-        )
+        for index in range(BLINK_COUNT):
+            if index:
+                await asyncio.sleep(BLINK_INTERVAL)
+            await self._async_set_light(colour)
+            await asyncio.sleep(BLINK_INTERVAL)
+            await self._async_set_light(None)
+
+        # Force the next update through: the LED is off, so the cached colour
+        # no longer describes reality.
+        self._colour_written = False
+        await self._async_update_led()
 
     async def _write(self, value: NormalizedValue) -> None:
         """Hand a value to the output backend, tolerating a bad target.
@@ -456,3 +569,14 @@ class DeviceRuntime:
             await controller.async_preset_changed()
         for listener in list(self._preset_listeners):
             listener()
+
+        preset = self.active_preset
+        if preset is not None and preset.feedback_colour is not None:
+            # After the write, not before: the blink confirms a change that has
+            # already happened, and must not delay the needles moving.
+            await asyncio.gather(
+                *(
+                    controller.async_blink(preset.feedback_colour)
+                    for controller in self.controllers
+                )
+            )

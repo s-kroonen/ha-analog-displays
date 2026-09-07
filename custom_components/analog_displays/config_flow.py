@@ -24,8 +24,12 @@ from homeassistant.helpers.selector import NumberSelectorMode, SelectSelectorMod
 import voluptuous as vol
 
 from .const import (
-    CONF_ADD_ANOTHER,
+    CONF_AT,
+    CONF_BUTTON_COUNT,
+    CONF_DISPLAY_COUNT,
+    CONF_END,
     CONF_FADE,
+    CONF_FEEDBACK_COLOUR,
     CONF_LABEL,
     CONF_LIGHT_ENTITY_ID,
     CONF_MAX_VALUE,
@@ -40,6 +44,8 @@ from .const import (
     CONF_STATISTIC_PERIOD,
     CONF_STATISTIC_TYPE,
     CONF_STATISTICS_INTERVAL,
+    CONF_UNIT,
+    CONFIG_VERSION,
     DEFAULT_MIN_UPDATE_INTERVAL,
     DOMAIN,
     LED_MODE_GRADIENT,
@@ -58,10 +64,11 @@ from .models import (
     Device,
     Display,
     HardwareProfile,
-    LedConfig,
     Preset,
     PresetAssignment,
+    RGBColor,
 )
+from .units import compatible
 from .wizard import (
     LED_KIND_ADDRESSABLE,
     LED_KIND_NONE,
@@ -84,8 +91,26 @@ CONF_COLOUR_FIELD = "colour"
 DEFAULT_BOARD = "esp32-devkit-v1"
 CONF_DISPLAY_INDEX = "display_index"
 CONF_PRESET_INDEX = "preset_index"
+CONF_ZONE_COUNT = "zone_count"
 
-STEP_USER_SCHEMA = vol.Schema({vol.Required(CONF_NAME): str})
+#: Sources whose state is a plain number. Any of these can drive a meter.
+SOURCE_DOMAINS = ["sensor", "number", "input_number", "counter"]
+
+STEP_USER_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_NAME): str,
+        vol.Required(CONF_DISPLAY_COUNT, default=1): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1, max=16, step=1, mode=NumberSelectorMode.BOX
+            )
+        ),
+        vol.Required(CONF_BUTTON_COUNT, default=0): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=16, step=1, mode=NumberSelectorMode.BOX
+            )
+        ),
+    }
+)
 
 
 def _display_schema() -> vol.Schema:
@@ -99,13 +124,6 @@ def _display_schema() -> vol.Schema:
             vol.Optional(CONF_LIGHT_ENTITY_ID): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="light")
             ),
-            vol.Required(CONF_MODE, default=LED_MODE_PRESET): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[LED_MODE_PRESET, LED_MODE_GRADIENT, LED_MODE_OFF],
-                    translation_key="led_mode",
-                )
-            ),
-            vol.Required(CONF_FADE, default=False): selector.BooleanSelector(),
             vol.Required(
                 CONF_MIN_UPDATE_INTERVAL, default=DEFAULT_MIN_UPDATE_INTERVAL
             ): selector.NumberSelector(
@@ -117,14 +135,18 @@ def _display_schema() -> vol.Schema:
                     mode=NumberSelectorMode.BOX,
                 )
             ),
-            vol.Required(CONF_ADD_ANOTHER, default=False): selector.BooleanSelector(),
         }
     )
 
 
 def _preset_schema() -> vol.Schema:
     """Build the schema for naming a preset."""
-    return vol.Schema({vol.Required(CONF_LABEL): str})
+    return vol.Schema(
+        {
+            vol.Required(CONF_LABEL): str,
+            vol.Optional(CONF_FEEDBACK_COLOUR): selector.ColorRGBSelector(),
+        }
+    )
 
 
 def _assignment_schema() -> vol.Schema:
@@ -139,9 +161,7 @@ def _assignment_schema() -> vol.Schema:
                 )
             ),
             vol.Optional(CONF_SOURCE_ENTITY_ID): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain=["sensor", "number", "input_number"]
-                )
+                selector.EntitySelectorConfig(domain=SOURCE_DOMAINS)
             ),
             vol.Optional(CONF_STATISTIC_ENTITY_ID): selector.StatisticSelector(),
             vol.Optional(CONF_STATISTIC_TYPE, default="mean"): selector.SelectSelector(
@@ -155,6 +175,7 @@ def _assignment_schema() -> vol.Schema:
                     translation_key="statistic_period",
                 )
             ),
+            vol.Optional(CONF_UNIT): selector.TextSelector(),
             vol.Required(CONF_MIN_VALUE, default=0.0): selector.NumberSelector(
                 selector.NumberSelectorConfig(mode=NumberSelectorMode.BOX, step="any")
             ),
@@ -162,6 +183,33 @@ def _assignment_schema() -> vol.Schema:
                 selector.NumberSelectorConfig(mode=NumberSelectorMode.BOX, step="any")
             ),
             vol.Optional(CONF_COLOUR_FIELD): selector.ColorRGBSelector(),
+            vol.Required(CONF_MODE, default=LED_MODE_PRESET): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[LED_MODE_PRESET, LED_MODE_GRADIENT, LED_MODE_OFF],
+                    translation_key="led_mode",
+                )
+            ),
+            vol.Required(CONF_FADE, default=False): selector.BooleanSelector(),
+            vol.Required(CONF_ZONE_COUNT, default=0): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=8, step=1, mode=NumberSelectorMode.BOX
+                )
+            ),
+        }
+    )
+
+
+def _zone_schema() -> vol.Schema:
+    """Build the schema for one LED zone, in the display's own unit."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_AT): selector.NumberSelector(
+                selector.NumberSelectorConfig(mode=NumberSelectorMode.BOX, step="any")
+            ),
+            vol.Required(CONF_COLOUR_FIELD): selector.ColorRGBSelector(),
+            vol.Optional(CONF_END): selector.NumberSelector(
+                selector.NumberSelectorConfig(mode=NumberSelectorMode.BOX, step="any")
+            ),
         }
     )
 
@@ -185,27 +233,6 @@ def validate_output_entity(hass: HomeAssistant, entity_id: str) -> str | None:
     if minimum == maximum:
         return "output_no_range"
     return None
-
-
-def _led_from_input(user_input: dict[str, Any]) -> LedConfig | None:
-    """Build the LED configuration for a display, if one was bound."""
-    light_entity_id = user_input.get(CONF_LIGHT_ENTITY_ID)
-    if not light_entity_id:
-        return None
-
-    mode = user_input.get(CONF_MODE, LED_MODE_PRESET)
-    stops: list[ColourStop] = []
-    if mode == LED_MODE_GRADIENT:
-        # Gradient stops are edited in the options flow; seed a single stop so
-        # the configuration is valid the moment the entry is created.
-        stops = [ColourStop(at=0.0, colour=(0, 255, 0))]
-
-    return LedConfig(
-        light_entity_id=light_entity_id,
-        mode=mode,
-        stops=stops,
-        fade=bool(user_input.get(CONF_FADE, False)),
-    )
 
 
 # --- wizard schemas ---------------------------------------------------------
@@ -256,7 +283,6 @@ def _display_hw_schema(board: BoardProfile, used: set[int]) -> vol.Schema:
                     translation_key="led_kind",
                 )
             ),
-            vol.Required(CONF_ADD_ANOTHER, default=False): selector.BooleanSelector(),
         }
     )
 
@@ -293,12 +319,11 @@ def _led_hw_schema(
 
 
 def _button_hw_schema(board: BoardProfile, used: set[int]) -> vol.Schema:
-    """Build the schema for one button's pin. Leaving it blank finishes."""
+    """Build the schema for one button's pin."""
     return vol.Schema(
         {
-            vol.Optional(CONF_PIN): _pin_selector(board.input_pins(), used),
+            vol.Required(CONF_PIN): _pin_selector(board.input_pins(), used),
             vol.Required(CONF_MULTI_CLICK, default=False): selector.BooleanSelector(),
-            vol.Required(CONF_ADD_ANOTHER, default=False): selector.BooleanSelector(),
         }
     )
 
@@ -351,7 +376,7 @@ def _wizard_request(
 class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the Analog Displays config flow."""
 
-    VERSION = 1
+    VERSION = CONFIG_VERSION
 
     @staticmethod
     @callback
@@ -365,8 +390,14 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
         self._displays: list[Display] = []
         self._presets: list[Preset] = []
         self._preset_label: str = ""
+        self._feedback_colour: RGBColor | None = None
         self._assignments: dict[int, PresetAssignment] = {}
         self._assign_index: int = 0
+        self._display_count: int = 1
+        self._button_count: int = 0
+        self._zones: list[ColourStop] = []
+        self._zone_target: int = 0
+        self._pending: PresetAssignment | None = None
 
         # Wizard state, untouched on the bypass path.
         self._board: str = ""
@@ -411,6 +442,8 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="user", data_schema=STEP_USER_SCHEMA)
 
         self._name = user_input[CONF_NAME]
+        self._display_count = int(user_input[CONF_DISPLAY_COUNT])
+        self._button_count = int(user_input[CONF_BUTTON_COUNT])
         return await self.async_step_hardware()
 
     async def async_step_hardware(
@@ -450,7 +483,7 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 self._hw_displays.append({"pin": pin, "led": None})
                 self._hw_led_kinds.append(user_input[CONF_LED_KIND])
-                if user_input[CONF_ADD_ANOTHER]:
+                if len(self._hw_displays) < self._display_count:
                     return await self.async_step_displays_hw()
                 return await self.async_step_leds_hw()
 
@@ -518,10 +551,10 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
         board = get_board(self._board)
         errors: dict[str, str] = {}
 
-        if user_input is not None:
-            if user_input.get(CONF_PIN) is None:
-                return await self.async_step_yaml_result()
+        if len(self._hw_buttons) >= self._button_count:
+            return await self.async_step_yaml_result()
 
+        if user_input is not None:
             pin = int(user_input[CONF_PIN])
             if pin in self._used_pins():
                 errors[CONF_PIN] = "pin_duplicate"
@@ -532,9 +565,7 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
                         "multi_click": bool(user_input[CONF_MULTI_CLICK]),
                     }
                 )
-                if user_input[CONF_ADD_ANOTHER]:
-                    return await self.async_step_buttons_hw()
-                return await self.async_step_yaml_result()
+                return await self.async_step_buttons_hw()
 
         return self.async_show_form(
             step_id="buttons_hw",
@@ -593,11 +624,11 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
                     Display(
                         name=user_input[CONF_NAME],
                         output_entity_id=user_input[CONF_OUTPUT_ENTITY_ID],
-                        led=_led_from_input(user_input),
+                        light_entity_id=user_input.get(CONF_LIGHT_ENTITY_ID),
                         min_update_interval=_interval(user_input),
                     )
                 )
-                if user_input[CONF_ADD_ANOTHER]:
+                if len(self._displays) < self._display_count:
                     return await self.async_step_bind_displays()
                 return await self.async_step_preset()
 
@@ -622,6 +653,7 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
         self._preset_label = user_input[CONF_LABEL]
+        self._feedback_colour = _colour_from_input(user_input, CONF_FEEDBACK_COLOUR)
         self._assignments = {}
         self._assign_index = 0
         return await self.async_step_preset_assign()
@@ -639,11 +671,18 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             assignment = _assignment_from_input(user_input)
             if assignment is not None:
-                try:
-                    assignment.validate("preset")
-                except AnalogDisplaysConfigError:
-                    errors[_error_field(assignment)] = _error_key(assignment)
-                else:
+                zones = int(user_input.get(CONF_ZONE_COUNT, 0))
+                errors = _validate_assignment(
+                    self.hass, assignment, zones_pending=bool(zones)
+                )
+                if not errors:
+                    if zones:
+                        # Zones are collected on their own pages, in the unit
+                        # this assignment was just calibrated in.
+                        self._pending = assignment
+                        self._zones = []
+                        self._zone_target = zones
+                        return await self.async_step_preset_zone()
                     self._assignments[self._assign_index] = assignment
 
             if not errors:
@@ -661,6 +700,51 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
                 "display": self._displays[self._assign_index].name,
             },
         )
+
+    async def async_step_preset_zone(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect one LED zone, expressed in the display's own unit."""
+        if user_input is not None:
+            self._zones.append(_zone_from_input(user_input))
+            if len(self._zones) < self._zone_target:
+                return await self.async_step_preset_zone()
+
+            assert self._pending is not None
+            complete = replace(self._pending, stops=list(self._zones))
+            zone_errors = _validate_assignment(self.hass, complete)
+            if zone_errors:
+                # Restart this assignment's zones rather than keep a bad set.
+                self._zones = []
+                return self.async_show_form(
+                    step_id="preset_zone",
+                    data_schema=_zone_schema(),
+                    errors=zone_errors,
+                    description_placeholders=self._zone_placeholders(),
+                )
+
+            self._assignments[self._assign_index] = complete
+            self._pending = None
+            self._assign_index += 1
+            if self._assign_index < len(self._displays):
+                return await self.async_step_preset_assign()
+            return await self.async_step_preset_done()
+
+        return self.async_show_form(
+            step_id="preset_zone",
+            data_schema=_zone_schema(),
+            description_placeholders=self._zone_placeholders(),
+        )
+
+    def _zone_placeholders(self) -> dict[str, str]:
+        """Describe which zone of which display is being asked for."""
+        assignment = self._pending
+        return {
+            "index": str(len(self._zones) + 1),
+            "count": str(self._zone_target),
+            "unit": "" if assignment is None else (assignment.unit or ""),
+            "display": self._displays[self._assign_index].name,
+        }
 
     async def async_step_preset_done(
         self, user_input: dict[str, Any] | None = None
@@ -731,16 +815,104 @@ def _assignment_from_input(user_input: dict[str, Any]) -> PresetAssignment | Non
     if mode == SOURCE_MODE_STATISTIC and not statistic_entity_id:
         return None
 
+    unit = user_input.get(CONF_UNIT) or None
     return PresetAssignment(
         source_mode=mode,
         source_entity_id=source_entity_id,
         statistic_entity_id=statistic_entity_id,
         statistic_type=user_input.get(CONF_STATISTIC_TYPE),
         statistic_period=user_input.get(CONF_STATISTIC_PERIOD),
+        unit=unit,
         min_value=float(user_input[CONF_MIN_VALUE]),
         max_value=float(user_input[CONF_MAX_VALUE]),
         colour=_colour_from_input(user_input),
+        led_mode=user_input.get(CONF_MODE, LED_MODE_PRESET),
+        fade=bool(user_input.get(CONF_FADE, False)),
     )
+
+
+def validate_source_unit(
+    hass: HomeAssistant, assignment: PresetAssignment
+) -> str | None:
+    """Return an error key if the source cannot be read in the chosen unit.
+
+    Catching this at config time is the point: a sensor in watts calibrated
+    against a range in kilowatts would otherwise read a thousand times high
+    with nothing to show anything was wrong.
+    """
+    if assignment.unit is None:
+        return None
+
+    entity_id = assignment.source_entity_id or assignment.statistic_entity_id
+    if not entity_id:
+        return None
+
+    state = hass.states.get(entity_id)
+    if state is None:
+        return None
+
+    if not compatible(
+        state.attributes.get("unit_of_measurement"),
+        assignment.unit,
+        state.attributes.get("device_class"),
+    ):
+        return "incompatible_unit"
+    return None
+
+
+def validate_numeric_source(hass: HomeAssistant, entity_id: str) -> str | None:
+    """Return an error key if the chosen source is not a number."""
+    state = hass.states.get(entity_id)
+    if state is None or state.state in ("unknown", "unavailable", ""):
+        # Nothing to check against yet; the runtime handles it as a dead source.
+        return None
+    try:
+        float(state.state)
+    except (TypeError, ValueError):
+        return "source_not_numeric"
+    return None
+
+
+def _zone_from_input(user_input: dict[str, Any]) -> ColourStop:
+    """Build one LED zone from a submitted form."""
+    colour = _colour_from_input(user_input)
+    end = user_input.get(CONF_END)
+    return ColourStop(
+        at=float(user_input[CONF_AT]),
+        colour=colour or (255, 255, 255),
+        end=None if end is None else float(end),
+    )
+
+
+def _validate_assignment(
+    hass: HomeAssistant, assignment: PresetAssignment, *, zones_pending: bool = False
+) -> dict[str, str]:
+    """Check an assignment against the model and against its live source.
+
+    ``zones_pending`` covers the gap while LED zones are still being collected
+    on their own pages: everything else is checked now, and the zones are
+    validated once they are attached.
+    """
+    candidate = assignment
+    if zones_pending and not assignment.stops:
+        candidate = replace(
+            assignment, stops=[ColourStop(at=assignment.min_value, colour=(0, 0, 0))]
+        )
+    try:
+        candidate.validate("preset")
+    except AnalogDisplaysConfigError:
+        return {_error_field(assignment): _error_key(assignment)}
+
+    if assignment.source_entity_id:
+        error = validate_numeric_source(hass, assignment.source_entity_id)
+        if error:
+            return {CONF_SOURCE_ENTITY_ID: error}
+
+    error = validate_source_unit(hass, assignment)
+    if error:
+        return {CONF_UNIT: error}
+
+    return {}
 
 
 def _error_field(assignment: PresetAssignment) -> str:
@@ -757,9 +929,11 @@ def _error_key(assignment: PresetAssignment) -> str:
     return "invalid_source"
 
 
-def _colour_from_input(user_input: dict[str, Any]) -> tuple[int, int, int] | None:
+def _colour_from_input(
+    user_input: dict[str, Any], field: str = CONF_COLOUR_FIELD
+) -> RGBColor | None:
     """Read an optional RGB colour out of a submitted form."""
-    colour = user_input.get(CONF_COLOUR_FIELD)
+    colour = user_input.get(field)
     if not colour:
         return None
     red, green, blue = colour
@@ -822,7 +996,7 @@ class AnalogDisplaysOptionsFlow(OptionsFlowWithReload):
                 displays[index] = Display(
                     name=user_input[CONF_NAME],
                     output_entity_id=output,
-                    led=_led_from_input(user_input),
+                    light_entity_id=user_input.get(CONF_LIGHT_ENTITY_ID),
                     min_update_interval=_interval(user_input),
                 )
                 return self._save(replace(device, displays=displays))
@@ -1006,13 +1180,6 @@ def _edit_display_schema(device: Device) -> vol.Schema:
             vol.Optional(CONF_LIGHT_ENTITY_ID): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="light")
             ),
-            vol.Required(CONF_MODE, default=LED_MODE_PRESET): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[LED_MODE_PRESET, LED_MODE_GRADIENT, LED_MODE_OFF],
-                    translation_key="led_mode",
-                )
-            ),
-            vol.Required(CONF_FADE, default=False): selector.BooleanSelector(),
             vol.Required(
                 CONF_MIN_UPDATE_INTERVAL, default=DEFAULT_MIN_UPDATE_INTERVAL
             ): selector.NumberSelector(

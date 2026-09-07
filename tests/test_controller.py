@@ -15,7 +15,7 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.analog_displays.const import DOMAIN
+from custom_components.analog_displays.const import CONFIG_VERSION, DOMAIN
 from custom_components.analog_displays.repairs import source_issue_id
 from tests.helpers import settle
 from tests.test_init import device_options
@@ -37,7 +37,11 @@ def _output(hass: HomeAssistant) -> None:
 
 async def _setup(hass: HomeAssistant, **overrides: Any) -> MockConfigEntry:
     entry = MockConfigEntry(
-        domain=DOMAIN, title="Meter Panel", data={}, options=device_options(**overrides)
+        domain=DOMAIN,
+        title="Meter Panel",
+        data={},
+        options=device_options(**overrides),
+        version=CONFIG_VERSION,
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -301,14 +305,9 @@ async def test_the_led_is_not_used_to_signal_staleness(
     hass.states.async_set("light.led_left", "off")
 
     displays = device_options()["displays"]
-    displays[0]["led"] = {
-        "light_entity_id": "light.led_left",
-        "mode": "preset",
-        "stops": [],
-        "fade": False,
-    }
+    displays[0]["light_entity_id"] = "light.led_left"
     presets = device_options()["presets"]
-    presets[0]["assignments"]["0"]["colour"] = [0, 255, 0]
+    presets[0]["assignments"]["0"] |= {"colour": [0, 255, 0], "mode": "preset"}
     await _setup(hass, displays=displays, presets=presets)
 
     # The preset colour is showing.

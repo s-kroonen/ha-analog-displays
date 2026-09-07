@@ -13,7 +13,7 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.analog_displays.const import DOMAIN
+from custom_components.analog_displays.const import CONFIG_VERSION, DOMAIN
 from tests.test_buttons import _presets
 from tests.test_init import device_options
 
@@ -45,6 +45,7 @@ async def _setup(hass: HomeAssistant, **overrides: Any) -> MockConfigEntry:
         title="Meter Panel",
         data={},
         options=device_options(**({"presets": _presets()} | overrides)),
+        version=CONFIG_VERSION,
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -64,8 +65,6 @@ def _display_form(**overrides: Any) -> dict[str, Any]:
         "display_index": "0",
         "name": "Left",
         "output_entity_id": "number.meter_left",
-        "mode": "preset",
-        "fade": False,
         "min_update_interval": 5.0,
     }
     return base | overrides
@@ -169,6 +168,7 @@ async def test_rebinding_rejects_an_output_another_display_uses(
 
 
 async def test_binding_an_led_through_the_options_flow(hass: HomeAssistant) -> None:
+    """The display owns which light it drives; the preset owns how it behaves."""
     entry = await _setup(hass)
     result = await _open(hass, entry)
     result = await hass.config_entries.options.async_configure(
@@ -176,15 +176,11 @@ async def test_binding_an_led_through_the_options_flow(hass: HomeAssistant) -> N
     )
 
     await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        _display_form(light_entity_id="light.led_left", mode="gradient", fade=True),
+        result["flow_id"], _display_form(light_entity_id="light.led_left")
     )
     await hass.async_block_till_done()
 
-    led = entry.runtime_data.device.displays[0].led
-    assert led is not None
-    assert led.light_entity_id == "light.led_left"
-    assert led.fade is True
+    assert entry.runtime_data.device.displays[0].light_entity_id == "light.led_left"
 
 
 # --- presets ----------------------------------------------------------------

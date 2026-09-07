@@ -31,9 +31,9 @@ from .const import (
     CONF_END,
     CONF_EVENT_FILTER,
     CONF_FADE,
+    CONF_FEEDBACK_COLOUR,
     CONF_HARDWARE_PROFILE,
     CONF_LABEL,
-    CONF_LED,
     CONF_LIGHT_ENTITY_ID,
     CONF_MAX_VALUE,
     CONF_MIN_UPDATE_INTERVAL,
@@ -54,9 +54,11 @@ from .const import (
     CONF_STOPS,
     CONF_TARGET_PRESET_INDEX,
     CONF_TRIGGER_ENTITY_ID,
+    CONF_UNIT,
     DEFAULT_MIN_UPDATE_INTERVAL,
     DEFAULT_STATISTICS_INTERVAL,
     LED_MODE_GRADIENT,
+    LED_MODE_PRESET,
     LED_MODES,
     MAX_PRESETS,
     MAX_RGB_CHANNEL,
@@ -92,11 +94,15 @@ def _check_colour(colour: RGBColor | None, where: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ColourStop:
-    """One colour anchored at a normalized position on a display's scale.
+    """One colour anchored at a value on the display's own scale.
 
-    ``at`` is where the colour reaches full strength. ``end`` optionally cuts
-    the stop short: with an ``end`` below the next stop's ``at``, the LED goes
-    dark in the gap between them instead of carrying the colour onwards.
+    ``at`` is in the assignment's unit — "red from 2 kW" — not a fraction of
+    full scale, because that is how a person describes a meter out loud. It is
+    converted to a normalized position at write time, so :mod:`.led` keeps
+    working purely in 0.0-1.0.
+
+    ``end`` optionally cuts the stop short: with an ``end`` below the next
+    stop's ``at``, the LED goes dark in the gap between them.
     """
 
     at: float
@@ -121,77 +127,27 @@ class ColourStop:
         )
 
     def validate(self, where: str) -> None:
-        """Raise if this stop is not a usable point on a 0.0-1.0 scale."""
-        if not 0.0 <= self.at <= 1.0:
-            raise AnalogDisplaysConfigError(f"{where}: stop position must be 0.0-1.0")
-        if self.end is not None:
-            if not 0.0 <= self.end <= 1.0:
-                raise AnalogDisplaysConfigError(f"{where}: stop end must be 0.0-1.0")
-            if self.end <= self.at:
-                raise AnalogDisplaysConfigError(
-                    f"{where}: stop end must be above its position"
-                )
-        _check_colour(self.colour, where)
-
-
-@dataclass(frozen=True, slots=True)
-class LedConfig:
-    """How a display's indicator LED is driven.
-
-    ``preset`` shows the active preset's assigned colour. ``gradient``
-    colours the LED by the display's *normalized* value, so the stops stay
-    meaningful across every preset on that display without reconfiguration.
-    """
-
-    light_entity_id: str
-    mode: str
-    stops: list[ColourStop] = field(default_factory=list)
-    fade: bool = False
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize for config entry options."""
-        return {
-            CONF_LIGHT_ENTITY_ID: self.light_entity_id,
-            CONF_MODE: self.mode,
-            CONF_STOPS: [stop.to_dict() for stop in self.stops],
-            CONF_FADE: self.fade,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Self:
-        """Deserialize from config entry options."""
-        return cls(
-            light_entity_id=data[CONF_LIGHT_ENTITY_ID],
-            mode=data[CONF_MODE],
-            stops=[ColourStop.from_dict(stop) for stop in data.get(CONF_STOPS, [])],
-            fade=bool(data.get(CONF_FADE, False)),
-        )
-
-    def validate(self, where: str) -> None:
-        """Raise if this LED configuration cannot be driven."""
-        if not self.light_entity_id:
-            raise AnalogDisplaysConfigError(f"{where}: a light entity is required")
-        if self.mode not in LED_MODES:
-            raise AnalogDisplaysConfigError(f"{where}: unknown LED mode {self.mode!r}")
-        if self.mode == LED_MODE_GRADIENT and not self.stops:
+        """Raise if this stop cannot sit on a scale."""
+        if self.end is not None and self.end <= self.at:
             raise AnalogDisplaysConfigError(
-                f"{where}: gradient mode needs at least one colour stop"
+                f"{where}: stop end must be above its position"
             )
-        for index, stop in enumerate(self.stops):
-            stop.validate(f"{where} stop {index}")
+        _check_colour(self.colour, where)
 
 
 @dataclass(frozen=True, slots=True)
 class Display:
     """A physical display and the entities it is bound to.
 
-    This is binding only — which output to write and which LED to colour. What
-    it *shows* comes from the active preset's assignment for this display.
+    Binding only: which output moves and which light is its indicator. What it
+    *shows*, how it is calibrated, and how its LED behaves all come from the
+    active preset's assignment — an LED threshold in kW would be meaningless
+    under a preset showing degrees.
     """
 
     name: str
     output_entity_id: str
-    led: LedConfig | None = None
+    light_entity_id: str | None = None
     min_update_interval: timedelta = field(
         default=timedelta(seconds=DEFAULT_MIN_UPDATE_INTERVAL)
     )
@@ -201,18 +157,17 @@ class Display:
         return {
             CONF_NAME: self.name,
             CONF_OUTPUT_ENTITY_ID: self.output_entity_id,
-            CONF_LED: None if self.led is None else self.led.to_dict(),
+            CONF_LIGHT_ENTITY_ID: self.light_entity_id,
             CONF_MIN_UPDATE_INTERVAL: self.min_update_interval.total_seconds(),
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Self:
         """Deserialize from config entry options."""
-        led = data.get(CONF_LED)
         return cls(
             name=data[CONF_NAME],
             output_entity_id=data[CONF_OUTPUT_ENTITY_ID],
-            led=None if led is None else LedConfig.from_dict(led),
+            light_entity_id=data.get(CONF_LIGHT_ENTITY_ID),
             min_update_interval=timedelta(
                 seconds=float(
                     data.get(CONF_MIN_UPDATE_INTERVAL, DEFAULT_MIN_UPDATE_INTERVAL)
@@ -230,17 +185,17 @@ class Display:
             raise AnalogDisplaysConfigError(
                 f"{where}: minimum update interval cannot be negative"
             )
-        if self.led is not None:
-            self.led.validate(where)
 
 
 @dataclass(frozen=True, slots=True)
 class PresetAssignment:
-    """What one display shows while a given preset is active.
+    """What one display shows under a given preset, and how its LED behaves.
 
-    Calibration (``min_value``/``max_value``) lives here rather than on the
-    display, so the same meter can be a 0-3000 W power gauge under one preset
-    and a 0-100 % humidity gauge under another.
+    This is the complete record for a meter under one preset: where the number
+    comes from, the unit and range it is read against, and what the indicator
+    LED does. Calibration lives here rather than on the display so the same
+    meter can be a 0-10 kW power gauge under one preset and a 0-100 % humidity
+    gauge under another, and the LED thresholds travel with it.
     """
 
     source_mode: str = SOURCE_MODE_ENTITY
@@ -248,9 +203,20 @@ class PresetAssignment:
     statistic_entity_id: str | None = None
     statistic_type: str | None = None
     statistic_period: str | None = None
+
+    unit: str | None = None
+    """Unit the range and thresholds are expressed in.
+
+    ``None`` means "whatever the source publishes", so no conversion happens.
+    """
+
     min_value: float = 0.0
     max_value: float = 100.0
     colour: RGBColor | None = None
+
+    led_mode: str = LED_MODE_PRESET
+    fade: bool = False
+    stops: list[ColourStop] = field(default_factory=list)
 
     @property
     def statistic_id(self) -> str | None:
@@ -267,9 +233,13 @@ class PresetAssignment:
             CONF_STATISTIC_ENTITY_ID: self.statistic_entity_id,
             CONF_STATISTIC_TYPE: self.statistic_type,
             CONF_STATISTIC_PERIOD: self.statistic_period,
+            CONF_UNIT: self.unit,
             CONF_MIN_VALUE: self.min_value,
             CONF_MAX_VALUE: self.max_value,
             CONF_COLOUR: None if self.colour is None else list(self.colour),
+            CONF_MODE: self.led_mode,
+            CONF_FADE: self.fade,
+            CONF_STOPS: [stop.to_dict() for stop in self.stops],
         }
 
     @classmethod
@@ -281,9 +251,13 @@ class PresetAssignment:
             statistic_entity_id=data.get(CONF_STATISTIC_ENTITY_ID),
             statistic_type=data.get(CONF_STATISTIC_TYPE),
             statistic_period=data.get(CONF_STATISTIC_PERIOD),
+            unit=data.get(CONF_UNIT),
             min_value=float(data[CONF_MIN_VALUE]),
             max_value=float(data[CONF_MAX_VALUE]),
             colour=_as_colour(data.get(CONF_COLOUR)),
+            led_mode=data.get(CONF_MODE, LED_MODE_PRESET),
+            fade=bool(data.get(CONF_FADE, False)),
+            stops=[ColourStop.from_dict(stop) for stop in data.get(CONF_STOPS, [])],
         )
 
     def validate(self, where: str) -> None:
@@ -314,6 +288,16 @@ class PresetAssignment:
             raise AnalogDisplaysConfigError(
                 f"{where}: minimum and maximum values must differ"
             )
+        if self.led_mode not in LED_MODES:
+            raise AnalogDisplaysConfigError(
+                f"{where}: unknown LED mode {self.led_mode!r}"
+            )
+        if self.led_mode == LED_MODE_GRADIENT and not self.stops:
+            raise AnalogDisplaysConfigError(
+                f"{where}: colouring by value needs at least one LED zone"
+            )
+        for index, stop in enumerate(self.stops):
+            stop.validate(f"{where} zone {index}")
         _check_colour(self.colour, where)
 
 
@@ -328,6 +312,12 @@ class Preset:
 
     label: str
     assignments: dict[int, PresetAssignment] = field(default_factory=dict)
+    feedback_colour: RGBColor | None = None
+    """Blinked by every display this preset drives when it becomes active.
+
+    Confirms a preset change on a board with no screen. ``None`` means no
+    blink.
+    """
 
     def assignment_for(self, display_index: int) -> PresetAssignment | None:
         """Return the assignment driving ``display_index``, if any."""
@@ -345,6 +335,9 @@ class Preset:
                 str(index): assignment.to_dict()
                 for index, assignment in sorted(self.assignments.items())
             },
+            CONF_FEEDBACK_COLOUR: (
+                None if self.feedback_colour is None else list(self.feedback_colour)
+            ),
         }
 
     @classmethod
@@ -356,6 +349,7 @@ class Preset:
                 int(index): PresetAssignment.from_dict(assignment)
                 for index, assignment in data.get(CONF_ASSIGNMENTS, {}).items()
             },
+            feedback_colour=_as_colour(data.get(CONF_FEEDBACK_COLOUR)),
         )
 
     def validate(self, where: str, display_count: int) -> None:
@@ -372,6 +366,7 @@ class Preset:
                     f"{where}: assignment refers to unknown display {index}"
                 )
             assignment.validate(f"{where} display {index}")
+        _check_colour(self.feedback_colour, where)
 
 
 @dataclass(frozen=True, slots=True)

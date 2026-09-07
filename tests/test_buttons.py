@@ -16,7 +16,11 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.analog_displays.const import DOMAIN, EVENT_BUTTON_PRESSED
+from custom_components.analog_displays.const import (
+    CONFIG_VERSION,
+    DOMAIN,
+    EVENT_BUTTON_PRESSED,
+)
 from tests.helpers import device_for
 from tests.test_init import device_options
 
@@ -82,7 +86,11 @@ def _button(**overrides: Any) -> dict[str, Any]:
 async def _setup(hass: HomeAssistant, **overrides: Any) -> MockConfigEntry:
     options = device_options(**({"presets": _presets()} | overrides))
     entry = MockConfigEntry(
-        domain=DOMAIN, title="Meter Panel", data={}, options=options
+        domain=DOMAIN,
+        title="Meter Panel",
+        data={},
+        options=options,
+        version=CONFIG_VERSION,
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)

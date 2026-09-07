@@ -3,9 +3,11 @@
     "step": {
       "user": {
         "title": "Analog Displays",
-        "description": "Name this device. One config entry represents one physical board.",
+        "description": "Name this device and say how many displays and buttons it has. One config entry represents one physical board.",
         "data": {
-          "name": "Device name"
+          "name": "Device name",
+          "display_count": "Number of displays",
+          "button_count": "Number of buttons"
         }
       },
       "hardware": {
@@ -23,39 +25,46 @@
           "name": "Display name",
           "output_entity_id": "Output number entity",
           "light_entity_id": "Indicator LED (optional)",
-          "mode": "LED mode",
-          "fade": "Blend LED colours between stops",
-          "min_update_interval": "Minimum update interval",
-          "add_another": "Add another display"
+          "min_update_interval": "Minimum update interval"
         },
         "data_description": {
           "min_update_interval": "Rapid source updates are coalesced to at most one write per interval, which spares a mechanical movement.",
-          "fade": "With blending off, the LED switches colour sharply at each stop."
+          "light_entity_id": "Which light this display drives. What colour it shows is set per preset, alongside that preset's scale."
         }
       },
       "preset": {
         "title": "Preset {index}",
         "description": "A preset is a scene across the whole device: it decides what every display shows at once.",
         "data": {
-          "label": "Preset name"
+          "label": "Preset name",
+          "feedback_colour": "Blink colour on switching to this preset"
+        },
+        "data_description": {
+          "feedback_colour": "Every display this preset drives flashes this colour twice, then returns to normal. Leave empty for no blink."
         }
       },
       "preset_assign": {
         "title": "{preset}: {display}",
         "description": "Choose what {display} shows under the {preset} preset. Leave the source empty to leave this display unused.",
         "data": {
+          "source_mode": "Source type",
           "source_entity_id": "Source",
+          "statistic_entity_id": "Statistic",
+          "statistic_type": "Statistic type",
+          "statistic_period": "Statistic period",
+          "unit": "Display unit",
           "min_value": "Value at needle zero",
           "max_value": "Value at full scale",
           "colour": "LED colour for this preset",
-          "source_mode": "Source type",
-          "statistic_entity_id": "Statistic",
-          "statistic_type": "Statistic type",
-          "statistic_period": "Statistic period"
+          "mode": "LED mode",
+          "fade": "Blend LED colours between zones",
+          "zone_count": "Number of LED zones"
         },
         "data_description": {
-          "min_value": "Calibration belongs to the preset, so the same display can cover a different range under each preset.",
-          "source_mode": "Live entities push updates. Statistics are polled, and need the recorder."
+          "unit": "The unit this display is calibrated in, for example kW. The source is converted into it, so a sensor in W works against a range in kW. Leave empty to use the source's own unit unchanged.",
+          "min_value": "Calibration belongs to the preset, so the same display can cover a different range and unit under each preset.",
+          "source_mode": "Live entities push updates. Statistics are polled, and need the recorder.",
+          "zone_count": "How many colour zones the LED has. Each is entered on its own page, in the unit above."
         }
       },
       "preset_done": {
@@ -78,8 +87,7 @@
         "description": "Which GPIO drives display {index}, and does it have an indicator LED?",
         "data": {
           "pin": "Output GPIO",
-          "led_kind": "Indicator LED",
-          "add_another": "Add another display"
+          "led_kind": "Indicator LED"
         }
       },
       "leds_hw": {
@@ -95,16 +103,24 @@
       },
       "buttons_hw": {
         "title": "Button {index}",
-        "description": "Which GPIO reads button {index}? Leave it empty to finish. Buttons are global to the device, not tied to one display.",
+        "description": "Which GPIO reads button {index}? Buttons are global to the device, not tied to one display.",
         "data": {
           "pin": "Button GPIO",
-          "multi_click": "Detect single, double and long presses",
-          "add_another": "Add another button"
+          "multi_click": "Detect single, double and long presses"
         }
       },
       "yaml_result": {
         "title": "Your ESPHome configuration",
         "description": "Flash this with the ESPHome CLI or the web installer. This integration never compiles or flashes anything.\n\nYou will need `analog_displays_api_key`, `analog_displays_ota_password`, `wifi_ssid` and `wifi_password` in your ESPHome secrets.\n\n```yaml\n{yaml}\n```"
+      },
+      "preset_zone": {
+        "title": "{display}: LED zone {index} of {count}",
+        "description": "The value in {unit} from which this colour applies. Give an end to leave the LED dark above it until the next zone begins.",
+        "data": {
+          "at": "From value",
+          "colour": "Colour",
+          "end": "Until value (optional)"
+        }
       }
     },
     "error": {
@@ -117,7 +133,9 @@
       "pin_duplicate": "That pin is already in use on this board.",
       "pin_unsafe": "That pin is reserved for flash or latched at boot, so it cannot be used.",
       "pin_not_output_capable": "That pin is input-only and cannot drive a display or LED.",
-      "pin_not_on_board": "That pin does not exist on this board."
+      "pin_not_on_board": "That pin does not exist on this board.",
+      "incompatible_unit": "That source cannot be read in that unit. Check the unit matches the kind of quantity the sensor reports.",
+      "source_not_numeric": "That entity's state is not a number."
     },
     "abort": {
       "invalid_configuration": "The configuration that was assembled is not valid."
@@ -209,8 +227,6 @@
           "name": "Display name",
           "output_entity_id": "Output number entity",
           "light_entity_id": "Indicator LED (optional)",
-          "mode": "LED mode",
-          "fade": "Blend LED colours between stops",
           "min_update_interval": "Minimum update interval"
         }
       },
@@ -218,25 +234,32 @@
         "title": "Preset {index}",
         "description": "A preset is a scene across the whole device: it decides what every display shows at once.",
         "data": {
-          "label": "Preset name"
+          "label": "Preset name",
+          "feedback_colour": "Blink colour on switching to this preset"
         }
       },
       "edit_assignment": {
         "title": "{preset}: {display}",
         "description": "Choose what {display} shows under the {preset} preset. Leave the source empty to leave this display unused.",
         "data": {
+          "source_mode": "Source type",
           "source_entity_id": "Source",
+          "statistic_entity_id": "Statistic",
+          "statistic_type": "Statistic type",
+          "statistic_period": "Statistic period",
+          "unit": "Display unit",
           "min_value": "Value at needle zero",
           "max_value": "Value at full scale",
           "colour": "LED colour for this preset",
-          "source_mode": "Source type",
-          "statistic_entity_id": "Statistic",
-          "statistic_type": "Statistic type",
-          "statistic_period": "Statistic period"
+          "mode": "LED mode",
+          "fade": "Blend LED colours between zones",
+          "zone_count": "Number of LED zones"
         },
         "data_description": {
-          "min_value": "Calibration belongs to the preset, so the same display can cover a different range under each preset.",
-          "source_mode": "Live entities push updates. Statistics are polled, and need the recorder."
+          "unit": "The unit this display is calibrated in, for example kW. The source is converted into it, so a sensor in W works against a range in kW. Leave empty to use the source's own unit unchanged.",
+          "min_value": "Calibration belongs to the preset, so the same display can cover a different range and unit under each preset.",
+          "source_mode": "Live entities push updates. Statistics are polled, and need the recorder.",
+          "zone_count": "How many colour zones the LED has. Each is entered on its own page, in the unit above."
         }
       },
       "remove_preset": {
@@ -267,7 +290,9 @@
       "pin_duplicate": "That pin is already in use on this board.",
       "pin_unsafe": "That pin is reserved for flash or latched at boot, so it cannot be used.",
       "pin_not_output_capable": "That pin is input-only and cannot drive a display or LED.",
-      "pin_not_on_board": "That pin does not exist on this board."
+      "pin_not_on_board": "That pin does not exist on this board.",
+      "incompatible_unit": "That source cannot be read in that unit. Check the unit matches the kind of quantity the sensor reports.",
+      "source_not_numeric": "That entity's state is not a number."
     },
     "abort": {
       "invalid_configuration": "The configuration that was assembled is not valid.",

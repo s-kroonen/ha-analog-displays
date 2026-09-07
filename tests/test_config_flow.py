@@ -27,7 +27,7 @@ def _entities(hass: HomeAssistant) -> None:
     hass.states.async_set("light.led_left", "off", {})
 
 
-async def _start(hass: HomeAssistant) -> str:
+async def _start(hass: HomeAssistant, displays: int = 1, buttons: int = 0) -> str:
     """Run the user step and stop on the hardware branch."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
@@ -36,7 +36,8 @@ async def _start(hass: HomeAssistant) -> str:
     assert result["step_id"] == "user"
 
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"name": "Meter Panel"}
+        result["flow_id"],
+        {"name": "Meter Panel", "display_count": displays, "button_count": buttons},
     )
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "hardware"
@@ -50,16 +51,11 @@ async def _configure(
     return await hass.config_entries.flow.async_configure(flow_id, user_input)
 
 
-def _display(
-    name: str, entity_id: str, *, add_another: bool = False, **extra: Any
-) -> dict[str, Any]:
+def _display(name: str, entity_id: str, **extra: Any) -> dict[str, Any]:
     return {
         "name": name,
         "output_entity_id": entity_id,
-        "mode": "preset",
-        "fade": False,
         "min_update_interval": 5.0,
-        "add_another": add_another,
         **extra,
     }
 
@@ -111,7 +107,7 @@ async def test_the_wizard_generates_yaml_then_hands_over_to_binding(
     hass: HomeAssistant,
 ) -> None:
     """The wizard is a detour; it ends at the same binding steps."""
-    flow_id = await _start(hass)
+    flow_id = await _start(hass, buttons=1)
 
     result = await _configure(hass, flow_id, {"next_step_id": "wizard"})
     assert result["step_id"] == "wizard"
@@ -119,14 +115,10 @@ async def test_the_wizard_generates_yaml_then_hands_over_to_binding(
     result = await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
     assert result["step_id"] == "displays_hw"
 
-    result = await _configure(
-        hass, flow_id, {"pin": "25", "led_kind": "none", "add_another": False}
-    )
+    result = await _configure(hass, flow_id, {"pin": "25", "led_kind": "none"})
     assert result["step_id"] == "buttons_hw"
 
-    result = await _configure(
-        hass, flow_id, {"pin": "4", "multi_click": True, "add_another": False}
-    )
+    result = await _configure(hass, flow_id, {"pin": "4", "multi_click": True})
     assert result["step_id"] == "yaml_result"
     yaml_text = result["description_placeholders"]["yaml"]
     assert "platform: ledc" in yaml_text
@@ -139,19 +131,13 @@ async def test_the_wizard_generates_yaml_then_hands_over_to_binding(
 
 async def test_the_wizard_walks_led_wiring_per_display(hass: HomeAssistant) -> None:
     """Mixed LED types across displays must work, including a shared strip."""
-    flow_id = await _start(hass)
+    flow_id = await _start(hass, displays=3)
     await _configure(hass, flow_id, {"next_step_id": "wizard"})
     await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
 
-    await _configure(
-        hass, flow_id, {"pin": "25", "led_kind": "addressable", "add_another": True}
-    )
-    await _configure(
-        hass, flow_id, {"pin": "26", "led_kind": "addressable", "add_another": True}
-    )
-    result = await _configure(
-        hass, flow_id, {"pin": "27", "led_kind": "raw_rgb", "add_another": False}
-    )
+    await _configure(hass, flow_id, {"pin": "25", "led_kind": "addressable"})
+    await _configure(hass, flow_id, {"pin": "26", "led_kind": "addressable"})
+    result = await _configure(hass, flow_id, {"pin": "27", "led_kind": "raw_rgb"})
     assert result["step_id"] == "leds_hw"
 
     await _configure(hass, flow_id, {"data_pin": "13", "led_index": 0})
@@ -160,11 +146,7 @@ async def test_the_wizard_walks_led_wiring_per_display(hass: HomeAssistant) -> N
     result = await _configure(
         hass, flow_id, {"red_pin": "16", "green_pin": "17", "blue_pin": "18"}
     )
-    assert result["step_id"] == "buttons_hw"
-
-    result = await _configure(
-        hass, flow_id, {"multi_click": False, "add_another": False}
-    )
+    # No buttons were declared up front, so the button pages are skipped.
     assert result["step_id"] == "yaml_result"
 
     yaml_text = result["description_placeholders"]["yaml"]
@@ -180,13 +162,11 @@ async def test_the_wizard_stops_offering_a_pin_once_it_is_taken(
     hass: HomeAssistant,
 ) -> None:
     """A duplicate is prevented in the picker rather than reported afterwards."""
-    flow_id = await _start(hass)
+    flow_id = await _start(hass, displays=2)
     await _configure(hass, flow_id, {"next_step_id": "wizard"})
     await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
 
-    result = await _configure(
-        hass, flow_id, {"pin": "25", "led_kind": "none", "add_another": True}
-    )
+    result = await _configure(hass, flow_id, {"pin": "25", "led_kind": "none"})
 
     options = _select_options(result["data_schema"], "pin")
     assert "25" not in options
@@ -207,12 +187,10 @@ async def test_the_wizard_never_offers_an_unsafe_pin(hass: HomeAssistant) -> Non
 async def test_the_wizard_offers_input_only_pins_for_buttons(
     hass: HomeAssistant,
 ) -> None:
-    flow_id = await _start(hass)
+    flow_id = await _start(hass, buttons=1)
     await _configure(hass, flow_id, {"next_step_id": "wizard"})
     await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
-    result = await _configure(
-        hass, flow_id, {"pin": "25", "led_kind": "none", "add_another": False}
-    )
+    result = await _configure(hass, flow_id, {"pin": "25", "led_kind": "none"})
 
     options = _select_options(result["data_schema"], "pin")
     assert {"34", "39"} <= options
@@ -221,15 +199,11 @@ async def test_the_wizard_offers_input_only_pins_for_buttons(
 
 async def test_the_wizard_stores_a_hardware_profile(hass: HomeAssistant) -> None:
     """The profile is what lets export_yaml regenerate later."""
-    flow_id = await _start(hass)
+    flow_id = await _start(hass, buttons=1)
     await _configure(hass, flow_id, {"next_step_id": "wizard"})
     await _configure(hass, flow_id, {"board": "esp32-devkit-v1"})
-    await _configure(
-        hass, flow_id, {"pin": "25", "led_kind": "none", "add_another": False}
-    )
-    await _configure(
-        hass, flow_id, {"pin": "4", "multi_click": False, "add_another": False}
-    )
+    await _configure(hass, flow_id, {"pin": "25", "led_kind": "none"})
+    await _configure(hass, flow_id, {"pin": "4", "multi_click": False})
     await _configure(hass, flow_id, {})
 
     await _configure(hass, flow_id, _display("Left", "number.meter_left"))
@@ -260,12 +234,10 @@ def _select_options(schema: Any, key: str) -> set[str]:
 
 async def test_two_displays_and_a_sparse_preset(hass: HomeAssistant) -> None:
     """A preset need not drive every display."""
-    flow_id = await _start(hass)
+    flow_id = await _start(hass, displays=2)
     await _configure(hass, flow_id, {"next_step_id": "bind_displays"})
 
-    await _configure(
-        hass, flow_id, _display("Left", "number.meter_left", add_another=True)
-    )
+    await _configure(hass, flow_id, _display("Left", "number.meter_left"))
     result = await _configure(hass, flow_id, _display("Right", "number.meter_right"))
     assert result["step_id"] == "preset"
 
@@ -325,11 +297,9 @@ async def test_rejects_missing_output_entity(hass: HomeAssistant) -> None:
 
 
 async def test_rejects_two_displays_sharing_an_output(hass: HomeAssistant) -> None:
-    flow_id = await _start(hass)
+    flow_id = await _start(hass, displays=2)
     await _configure(hass, flow_id, {"next_step_id": "bind_displays"})
-    await _configure(
-        hass, flow_id, _display("Left", "number.meter_left", add_another=True)
-    )
+    await _configure(hass, flow_id, _display("Left", "number.meter_left"))
 
     result = await _configure(hass, flow_id, _display("Also Left", "number.meter_left"))
     assert result["errors"] == {"output_entity_id": "output_already_used"}
@@ -364,21 +334,22 @@ async def test_led_binding_is_stored(hass: HomeAssistant) -> None:
     await _configure(
         hass,
         flow_id,
-        _display(
-            "Left",
-            "number.meter_left",
-            light_entity_id="light.led_left",
-            mode="gradient",
-            fade=True,
-        ),
+        _display("Left", "number.meter_left", light_entity_id="light.led_left"),
     )
     await _configure(hass, flow_id, {"label": "Power"})
-    await _configure(hass, flow_id, _assignment("sensor.solar"))
+    await _configure(
+        hass,
+        flow_id,
+        _assignment("sensor.solar")
+        | {"mode": "gradient", "fade": True, "zone_count": 2},
+    )
+    # Two zones, entered in the display's own units rather than as fractions.
+    await _configure(hass, flow_id, {"at": 600.0, "colour": [255, 0, 0]})
+    await _configure(hass, flow_id, {"at": 2400.0, "colour": [0, 255, 0]})
     result = await _configure(hass, flow_id, {"next_step_id": "finish"})
 
-    led = result["options"]["displays"][0]["led"]
-    assert led["light_entity_id"] == "light.led_left"
-    assert led["mode"] == "gradient"
-    assert led["fade"] is True
-    # Gradient mode is only valid with a stop, so one is seeded.
-    assert len(led["stops"]) == 1
+    assert result["options"]["displays"][0]["light_entity_id"] == "light.led_left"
+    assignment = result["options"]["presets"][0]["assignments"]["0"]
+    assert assignment["mode"] == "gradient"
+    assert assignment["fade"] is True
+    assert [stop["at"] for stop in assignment["stops"]] == [600.0, 2400.0]
