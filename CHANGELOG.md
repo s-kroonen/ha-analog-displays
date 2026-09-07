@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0]
+
 ### Changed
 
 - **Value ranges now carry a unit, and the source is converted into it.** A
@@ -112,5 +114,6 @@ release, the previous minor, and that floor.
 - `manifest.json` declares no requirements: everything is Python's standard
   library plus Home Assistant's own helpers.
 
-[Unreleased]: https://github.com/s-kroonen/ha-analog-displays/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/s-kroonen/ha-analog-displays/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/s-kroonen/ha-analog-displays/releases/tag/0.2.0
 [0.1.0]: https://github.com/s-kroonen/ha-analog-displays/releases/tag/0.1.0
