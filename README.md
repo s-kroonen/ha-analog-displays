@@ -132,6 +132,18 @@ For a battery gauge with stops at red 20 %, amber 50 % and green 80 %:
 Give a stop an explicit end to leave a deliberate dark band before the next one
 begins.
 
+## Changing things later
+
+**Configure** on the device opens the same questions again, and every one of
+them starts from what is stored rather than from a blank form:
+
+- **Edit a display** — its name, output entity, indicator LED and debounce
+  interval. With one display the picker is skipped.
+- **Edit a preset** — its name, blink colour, and then, for every display, the
+  source, unit, range, LED mode and each LED zone in turn. Change one threshold
+  and leave the rest as they are.
+- **Add** or **remove** a preset, and change the statistics polling interval.
+
 ## Entities and services
 
 Each config entry appears as one device.

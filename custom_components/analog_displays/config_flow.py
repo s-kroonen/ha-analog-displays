@@ -13,6 +13,7 @@ from typing import Any
 
 from homeassistant.config_entries import (
     ConfigEntry,
+    ConfigEntryBaseFlow,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
@@ -214,6 +215,72 @@ def _zone_schema() -> vol.Schema:
     )
 
 
+def _display_suggestions(display: Display) -> dict[str, Any]:
+    """Pre-fill the display form with how the display is bound today."""
+    suggested: dict[str, Any] = {
+        CONF_NAME: display.name,
+        CONF_OUTPUT_ENTITY_ID: display.output_entity_id,
+        CONF_MIN_UPDATE_INTERVAL: display.min_update_interval.total_seconds(),
+    }
+    if display.light_entity_id:
+        suggested[CONF_LIGHT_ENTITY_ID] = display.light_entity_id
+    return suggested
+
+
+def _preset_suggestions(preset: Preset) -> dict[str, Any]:
+    """Pre-fill the preset form with the preset's current name and colour."""
+    suggested: dict[str, Any] = {CONF_LABEL: preset.label}
+    if preset.feedback_colour is not None:
+        suggested[CONF_FEEDBACK_COLOUR] = list(preset.feedback_colour)
+    return suggested
+
+
+def _assignment_suggestions(
+    assignment: PresetAssignment | None,
+) -> dict[str, Any]:
+    """Pre-fill the assignment form with what this display shows today.
+
+    Editing a preset should start from the configuration in force, not from a
+    blank page: retyping a range and a set of LED zones to change one number
+    is how thresholds drift out of step with the meter.
+    """
+    if assignment is None:
+        return {}
+
+    suggested: dict[str, Any] = {
+        CONF_SOURCE_MODE: assignment.source_mode,
+        CONF_MIN_VALUE: assignment.min_value,
+        CONF_MAX_VALUE: assignment.max_value,
+        CONF_MODE: assignment.led_mode,
+        CONF_FADE: assignment.fade,
+        CONF_ZONE_COUNT: len(assignment.stops),
+    }
+    optional = {
+        CONF_SOURCE_ENTITY_ID: assignment.source_entity_id,
+        CONF_STATISTIC_ENTITY_ID: assignment.statistic_entity_id,
+        CONF_STATISTIC_TYPE: assignment.statistic_type,
+        CONF_STATISTIC_PERIOD: assignment.statistic_period,
+        CONF_UNIT: assignment.unit,
+    }
+    suggested.update({key: value for key, value in optional.items() if value})
+    if assignment.colour is not None:
+        suggested[CONF_COLOUR_FIELD] = list(assignment.colour)
+    return suggested
+
+
+def _zone_suggestions(stop: ColourStop | None) -> dict[str, Any]:
+    """Pre-fill one LED zone page with the zone it is replacing."""
+    if stop is None:
+        return {}
+    suggested: dict[str, Any] = {
+        CONF_AT: stop.at,
+        CONF_COLOUR_FIELD: list(stop.colour),
+    }
+    if stop.end is not None:
+        suggested[CONF_END] = stop.end
+    return suggested
+
+
 def validate_output_entity(hass: HomeAssistant, entity_id: str) -> str | None:
     """Return an error key if ``entity_id`` cannot be driven as an output.
 
@@ -373,10 +440,200 @@ def _wizard_request(
     )
 
 
-class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
+class _AssignmentWalk(ConfigEntryBaseFlow):
+    """The shared walk that asks what each display shows under one preset.
+
+    Both flows ask exactly the same questions — source, calibration, LED
+    behaviour, then one page per LED zone — so the walk lives here once and
+    each flow supplies its own step ids and decides what to do with the
+    finished assignments. Seeding it with a preset's current assignments is
+    what lets the options flow edit a preset in place instead of rebuilding
+    it from nothing.
+    """
+
+    #: Step ids the concrete flow exposes these two pages under.
+    ASSIGN_STEP: str
+    ZONE_STEP: str
+
+    def _init_walk(self) -> None:
+        """Set up the walk's state; call from the flow's ``__init__``."""
+        self._preset_label: str = ""
+        self._feedback_colour: RGBColor | None = None
+        self._walk_displays: list[Display] = []
+        self._assignments: dict[int, PresetAssignment] = {}
+        self._assign_index: int = 0
+        self._current: dict[int, PresetAssignment] = {}
+        self._pending: PresetAssignment | None = None
+        self._zones: list[ColourStop] = []
+        self._zone_target: int = 0
+
+    def _start_walk(
+        self,
+        displays: list[Display],
+        label: str,
+        colour: RGBColor | None,
+        *,
+        current: dict[int, PresetAssignment] | None = None,
+    ) -> None:
+        """Begin collecting one assignment per display.
+
+        ``current`` is what the preset holds today. Passing it pre-fills every
+        page; leaving it out gives the blank forms a new preset wants.
+        """
+        self._preset_label = label
+        self._feedback_colour = colour
+        self._walk_displays = displays
+        self._assignments = {}
+        self._assign_index = 0
+        self._current = dict(current or {})
+        self._pending = None
+        self._zones = []
+        self._zone_target = 0
+
+    def _finished_preset(self) -> Preset:
+        """Assemble the preset the walk just collected."""
+        return Preset(
+            label=self._preset_label,
+            assignments=dict(self._assignments),
+            feedback_colour=self._feedback_colour,
+        )
+
+    async def _async_walk_done(self) -> ConfigFlowResult:
+        """Handle the assembled assignments. Implemented by each flow."""
+        raise NotImplementedError
+
+    async def _async_assign(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask what one display shows under the preset being built or edited.
+
+        Leaving the source blank marks the display unused under this preset:
+        at runtime its needle goes to zero and its LED goes dark.
+        """
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            assignment = _assignment_from_input(user_input)
+            if assignment is not None:
+                zones = int(user_input.get(CONF_ZONE_COUNT, 0))
+                errors = _validate_assignment(
+                    self.hass, assignment, zones_pending=bool(zones)
+                )
+                if not errors:
+                    if zones:
+                        # Zones are collected on their own pages, in the unit
+                        # this assignment was just calibrated in.
+                        self._pending = assignment
+                        self._zones = []
+                        self._zone_target = zones
+                        return await self._async_zone()
+                    self._assignments[self._assign_index] = assignment
+
+            if not errors:
+                self._assign_index += 1
+                if self._assign_index < len(self._walk_displays):
+                    return await self._async_assign()
+                return await self._async_walk_done()
+
+        return self._show_assign(errors, submitted=user_input)
+
+    def _show_assign(
+        self, errors: dict[str, str], *, submitted: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Render the assignment page, pre-filled with what is stored today.
+
+        A rejected submission is handed back instead, so a single bad field
+        does not cost the user the rest of the page.
+        """
+        return self.async_show_form(
+            step_id=self.ASSIGN_STEP,
+            data_schema=self.add_suggested_values_to_schema(
+                _assignment_schema(),
+                submitted
+                or _assignment_suggestions(self._current.get(self._assign_index)),
+            ),
+            errors=errors,
+            description_placeholders={
+                "preset": self._preset_label,
+                "display": self._walk_displays[self._assign_index].name,
+            },
+        )
+
+    def _restart_walk(self, error: str) -> ConfigFlowResult:
+        """Send the user back to the first display with an error to fix.
+
+        The index has already run past the last display by the time a
+        whole-preset problem is noticed, so it has to be wound back before the
+        form is shown again.
+        """
+        self._assignments = {}
+        self._assign_index = 0
+        self._pending = None
+        self._zones = []
+        return self._show_assign({"base": error})
+
+    async def _async_zone(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect one LED zone, expressed in the display's own unit."""
+        if user_input is not None:
+            self._zones.append(_zone_from_input(user_input))
+            if len(self._zones) < self._zone_target:
+                return await self._async_zone()
+
+            assert self._pending is not None
+            complete = replace(self._pending, stops=list(self._zones))
+            zone_errors = _validate_assignment(self.hass, complete)
+            if zone_errors:
+                # Restart this assignment's zones rather than keep a bad set.
+                self._zones = []
+                return self._show_zone(zone_errors)
+
+            self._assignments[self._assign_index] = complete
+            self._pending = None
+            self._assign_index += 1
+            if self._assign_index < len(self._walk_displays):
+                return await self._async_assign()
+            return await self._async_walk_done()
+
+        return self._show_zone({})
+
+    def _show_zone(self, errors: dict[str, str]) -> ConfigFlowResult:
+        """Render one zone page, pre-filled with the zone it replaces."""
+        return self.async_show_form(
+            step_id=self.ZONE_STEP,
+            data_schema=self.add_suggested_values_to_schema(
+                _zone_schema(), _zone_suggestions(self._zone_being_replaced())
+            ),
+            errors=errors,
+            description_placeholders=self._zone_placeholders(),
+        )
+
+    def _zone_being_replaced(self) -> ColourStop | None:
+        """Return the zone this page replaces in the stored preset, if any."""
+        current = self._current.get(self._assign_index)
+        if current is None:
+            return None
+        index = len(self._zones)
+        return current.stops[index] if index < len(current.stops) else None
+
+    def _zone_placeholders(self) -> dict[str, str]:
+        """Describe which zone of which display is being asked for."""
+        assignment = self._pending
+        return {
+            "index": str(len(self._zones) + 1),
+            "count": str(self._zone_target),
+            "unit": "" if assignment is None else (assignment.unit or ""),
+            "display": self._walk_displays[self._assign_index].name,
+        }
+
+
+class AnalogDisplaysConfigFlow(_AssignmentWalk, ConfigFlow, domain=DOMAIN):
     """Handle the Analog Displays config flow."""
 
     VERSION = CONFIG_VERSION
+    ASSIGN_STEP = "preset_assign"
+    ZONE_STEP = "preset_zone"
 
     @staticmethod
     @callback
@@ -386,18 +643,12 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Start with an empty device to fill in step by step."""
+        self._init_walk()
         self._name: str = ""
         self._displays: list[Display] = []
         self._presets: list[Preset] = []
-        self._preset_label: str = ""
-        self._feedback_colour: RGBColor | None = None
-        self._assignments: dict[int, PresetAssignment] = {}
-        self._assign_index: int = 0
         self._display_count: int = 1
         self._button_count: int = 0
-        self._zones: list[ColourStop] = []
-        self._zone_target: int = 0
-        self._pending: PresetAssignment | None = None
 
         # Wizard state, untouched on the bypass path.
         self._board: str = ""
@@ -652,118 +903,37 @@ class AnalogDisplaysConfigFlow(ConfigFlow, domain=DOMAIN):
                 description_placeholders={"index": str(len(self._presets) + 1)},
             )
 
-        self._preset_label = user_input[CONF_LABEL]
-        self._feedback_colour = _colour_from_input(user_input, CONF_FEEDBACK_COLOUR)
-        self._assignments = {}
-        self._assign_index = 0
+        self._start_walk(
+            self._displays,
+            user_input[CONF_LABEL],
+            _colour_from_input(user_input, CONF_FEEDBACK_COLOUR),
+        )
         return await self.async_step_preset_assign()
 
     async def async_step_preset_assign(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Ask what one display shows under the preset being built.
-
-        Leaving the source blank marks the display unused under this preset:
-        at runtime its needle goes to zero and its LED goes dark.
-        """
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            assignment = _assignment_from_input(user_input)
-            if assignment is not None:
-                zones = int(user_input.get(CONF_ZONE_COUNT, 0))
-                errors = _validate_assignment(
-                    self.hass, assignment, zones_pending=bool(zones)
-                )
-                if not errors:
-                    if zones:
-                        # Zones are collected on their own pages, in the unit
-                        # this assignment was just calibrated in.
-                        self._pending = assignment
-                        self._zones = []
-                        self._zone_target = zones
-                        return await self.async_step_preset_zone()
-                    self._assignments[self._assign_index] = assignment
-
-            if not errors:
-                self._assign_index += 1
-                if self._assign_index < len(self._displays):
-                    return await self.async_step_preset_assign()
-                return await self.async_step_preset_done()
-
-        return self.async_show_form(
-            step_id="preset_assign",
-            data_schema=_assignment_schema(),
-            errors=errors,
-            description_placeholders={
-                "preset": self._preset_label,
-                "display": self._displays[self._assign_index].name,
-            },
-        )
+        """Ask what one display shows under the preset being built."""
+        return await self._async_assign(user_input)
 
     async def async_step_preset_zone(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Collect one LED zone, expressed in the display's own unit."""
-        if user_input is not None:
-            self._zones.append(_zone_from_input(user_input))
-            if len(self._zones) < self._zone_target:
-                return await self.async_step_preset_zone()
+        """Collect one LED zone for the assignment being built."""
+        return await self._async_zone(user_input)
 
-            assert self._pending is not None
-            complete = replace(self._pending, stops=list(self._zones))
-            zone_errors = _validate_assignment(self.hass, complete)
-            if zone_errors:
-                # Restart this assignment's zones rather than keep a bad set.
-                self._zones = []
-                return self.async_show_form(
-                    step_id="preset_zone",
-                    data_schema=_zone_schema(),
-                    errors=zone_errors,
-                    description_placeholders=self._zone_placeholders(),
-                )
-
-            self._assignments[self._assign_index] = complete
-            self._pending = None
-            self._assign_index += 1
-            if self._assign_index < len(self._displays):
-                return await self.async_step_preset_assign()
-            return await self.async_step_preset_done()
-
-        return self.async_show_form(
-            step_id="preset_zone",
-            data_schema=_zone_schema(),
-            description_placeholders=self._zone_placeholders(),
-        )
-
-    def _zone_placeholders(self) -> dict[str, str]:
-        """Describe which zone of which display is being asked for."""
-        assignment = self._pending
-        return {
-            "index": str(len(self._zones) + 1),
-            "count": str(self._zone_target),
-            "unit": "" if assignment is None else (assignment.unit or ""),
-            "display": self._displays[self._assign_index].name,
-        }
+    async def _async_walk_done(self) -> ConfigFlowResult:
+        """Every display has been asked about; confirm the preset."""
+        return await self.async_step_preset_done()
 
     async def async_step_preset_done(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Confirm the finished preset and offer to add another."""
         if not self._assignments:
-            return self.async_show_form(
-                step_id="preset_assign",
-                data_schema=_assignment_schema(),
-                errors={"base": "preset_drives_nothing"},
-                description_placeholders={
-                    "preset": self._preset_label,
-                    "display": self._displays[0].name,
-                },
-            )
+            return self._restart_walk("preset_drives_nothing")
 
-        self._presets.append(
-            Preset(label=self._preset_label, assignments=dict(self._assignments))
-        )
+        self._presets.append(self._finished_preset())
 
         if user_input is None and len(self._presets) < MAX_PRESETS:
             return self.async_show_menu(
@@ -940,19 +1110,26 @@ def _colour_from_input(
     return (int(red), int(green), int(blue))
 
 
-class AnalogDisplaysOptionsFlow(OptionsFlowWithReload):
+class AnalogDisplaysOptionsFlow(_AssignmentWalk, OptionsFlowWithReload):
     """Edit everything the initial flow collected.
+
+    Every edit route starts from what is stored rather than from a blank form,
+    so changing one threshold does not mean retyping a display's whole
+    calibration from memory.
 
     Subclassing :class:`OptionsFlowWithReload` is what makes an edit reload the
     entry cleanly instead of leaving orphaned entities behind.
     """
 
+    ASSIGN_STEP = "edit_assignment"
+    ZONE_STEP = "edit_zone"
+
     def __init__(self) -> None:
         """Start with nothing loaded; the menu step reads the stored device."""
+        self._init_walk()
         self._device: Device | None = None
-        self._preset_label: str = ""
-        self._assignments: dict[int, PresetAssignment] = {}
-        self._assign_index: int = 0
+        self._display_index: int = 0
+        self._preset_index: int | None = None
 
     @property
     def device(self) -> Device:
@@ -965,7 +1142,13 @@ class AnalogDisplaysOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Offer everything that can be edited after setup."""
-        options = ["displays", "add_preset", "remove_preset", "intervals"]
+        options = [
+            "displays",
+            "add_preset",
+            "edit_preset",
+            "remove_preset",
+            "intervals",
+        ]
         if self.device.hardware_profile is not None:
             options.append("export_yaml")
         return self.async_show_menu(step_id="init", menu_options=options)
@@ -975,12 +1158,31 @@ class AnalogDisplaysOptionsFlow(OptionsFlowWithReload):
     async def async_step_displays(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Re-bind a display's output entity and LED."""
+        """Choose which display to edit, unless there is only one."""
         device = self.device
+        if len(device.displays) == 1:
+            self._display_index = 0
+            return await self.async_step_edit_display()
+
+        if user_input is None:
+            return self.async_show_form(
+                step_id="displays",
+                data_schema=_display_choice_schema(device),
+            )
+
+        self._display_index = int(user_input[CONF_DISPLAY_INDEX])
+        return await self.async_step_edit_display()
+
+    async def async_step_edit_display(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Re-bind one display, starting from how it is bound today."""
+        device = self.device
+        index = self._display_index
+        display = device.displays[index]
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            index = int(user_input[CONF_DISPLAY_INDEX])
             output = user_input[CONF_OUTPUT_ENTITY_ID]
             error = validate_output_entity(self.hass, output)
             if error:
@@ -1002,9 +1204,15 @@ class AnalogDisplaysOptionsFlow(OptionsFlowWithReload):
                 return self._save(replace(device, displays=displays))
 
         return self.async_show_form(
-            step_id="displays",
-            data_schema=_edit_display_schema(device),
+            step_id="edit_display",
+            data_schema=self.add_suggested_values_to_schema(
+                _display_schema(),
+                # A rejected submission keeps what was typed; only the first
+                # visit falls back to what is stored.
+                user_input or _display_suggestions(display),
+            ),
             errors=errors,
+            description_placeholders={"display": display.name},
         )
 
     # --- presets ------------------------------------------------------------
@@ -1023,54 +1231,75 @@ class AnalogDisplaysOptionsFlow(OptionsFlowWithReload):
                 description_placeholders={"index": str(len(self.device.presets) + 1)},
             )
 
-        self._preset_label = user_input[CONF_LABEL]
-        self._assignments = {}
-        self._assign_index = 0
+        self._preset_index = None
+        self._start_walk(
+            list(self.device.displays),
+            user_input[CONF_LABEL],
+            _colour_from_input(user_input, CONF_FEEDBACK_COLOUR),
+        )
+        return await self.async_step_edit_assignment()
+
+    async def async_step_edit_preset(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose which preset to edit."""
+        device = self.device
+        if user_input is None:
+            return self.async_show_form(
+                step_id="edit_preset", data_schema=_preset_choice_schema(device)
+            )
+
+        self._preset_index = int(user_input[CONF_PRESET_INDEX])
+        return await self.async_step_edit_preset_name()
+
+    async def async_step_edit_preset_name(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Rename the preset, then walk its assignments pre-filled."""
+        assert self._preset_index is not None
+        preset = self.device.presets[self._preset_index]
+
+        if user_input is None:
+            return self.async_show_form(
+                step_id="edit_preset_name",
+                data_schema=self.add_suggested_values_to_schema(
+                    _preset_schema(), _preset_suggestions(preset)
+                ),
+                description_placeholders={"preset": preset.label},
+            )
+
+        self._start_walk(
+            list(self.device.displays),
+            user_input[CONF_LABEL],
+            _colour_from_input(user_input, CONF_FEEDBACK_COLOUR),
+            current=preset.assignments,
+        )
         return await self.async_step_edit_assignment()
 
     async def async_step_edit_assignment(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Ask what one display shows under the preset being added."""
+        """Ask what one display shows under the preset being added or edited."""
+        return await self._async_assign(user_input)
+
+    async def async_step_edit_zone(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect one LED zone for the assignment being edited."""
+        return await self._async_zone(user_input)
+
+    async def _async_walk_done(self) -> ConfigFlowResult:
+        """Store the assembled preset, replacing the edited one in place."""
+        if not self._assignments:
+            return self._restart_walk("preset_drives_nothing")
+
         device = self.device
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            assignment = _assignment_from_input(user_input)
-            if assignment is not None:
-                try:
-                    assignment.validate("preset")
-                except AnalogDisplaysConfigError:
-                    errors[_error_field(assignment)] = _error_key(assignment)
-                else:
-                    self._assignments[self._assign_index] = assignment
-
-            if not errors:
-                self._assign_index += 1
-                if self._assign_index < len(device.displays):
-                    return await self.async_step_edit_assignment()
-                if not self._assignments:
-                    errors["base"] = "preset_drives_nothing"
-                    self._assign_index = 0
-                else:
-                    presets = [
-                        *device.presets,
-                        Preset(
-                            label=self._preset_label,
-                            assignments=dict(self._assignments),
-                        ),
-                    ]
-                    return self._save(replace(device, presets=presets))
-
-        return self.async_show_form(
-            step_id="edit_assignment",
-            data_schema=_assignment_schema(),
-            errors=errors,
-            description_placeholders={
-                "preset": self._preset_label,
-                "display": device.displays[self._assign_index].name,
-            },
-        )
+        presets = list(device.presets)
+        if self._preset_index is None:
+            presets.append(self._finished_preset())
+        else:
+            presets[self._preset_index] = self._finished_preset()
+        return self._save(replace(device, presets=presets))
 
     async def async_step_remove_preset(
         self, user_input: dict[str, Any] | None = None
@@ -1161,8 +1390,8 @@ class AnalogDisplaysOptionsFlow(OptionsFlowWithReload):
         return self.async_create_entry(data=device.to_dict())
 
 
-def _edit_display_schema(device: Device) -> vol.Schema:
-    """Build the schema for re-binding one display."""
+def _display_choice_schema(device: Device) -> vol.Schema:
+    """Build the schema for choosing one of the device's displays."""
     return vol.Schema(
         {
             vol.Required(CONF_DISPLAY_INDEX, default=0): selector.SelectSelector(
@@ -1172,25 +1401,7 @@ def _edit_display_schema(device: Device) -> vol.Schema:
                         for index, display in enumerate(device.displays)
                     ]
                 )
-            ),
-            vol.Required(CONF_NAME): str,
-            vol.Required(CONF_OUTPUT_ENTITY_ID): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="number")
-            ),
-            vol.Optional(CONF_LIGHT_ENTITY_ID): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="light")
-            ),
-            vol.Required(
-                CONF_MIN_UPDATE_INTERVAL, default=DEFAULT_MIN_UPDATE_INTERVAL
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0,
-                    max=3600,
-                    step=0.5,
-                    unit_of_measurement="s",
-                    mode=NumberSelectorMode.BOX,
-                )
-            ),
+            )
         }
     )
 

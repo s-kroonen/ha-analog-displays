@@ -353,3 +353,33 @@ async def test_led_binding_is_stored(hass: HomeAssistant) -> None:
     assert assignment["mode"] == "gradient"
     assert assignment["fade"] is True
     assert [stop["at"] for stop in assignment["stops"]] == [600.0, 2400.0]
+
+
+async def test_recovering_from_a_preset_that_drives_nothing(
+    hass: HomeAssistant,
+) -> None:
+    """The rejected form has to be usable, not wound past the last display."""
+    flow_id = await _start(hass)
+    await _configure(hass, flow_id, {"next_step_id": "bind_displays"})
+    await _configure(hass, flow_id, _display("Left", "number.meter_left"))
+    await _configure(hass, flow_id, {"label": "Power"})
+    await _configure(hass, flow_id, _assignment(None))
+
+    result = await _configure(hass, flow_id, _assignment("sensor.solar"))
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "preset_done"
+
+
+async def test_the_preset_blink_colour_is_stored(hass: HomeAssistant) -> None:
+    """It was collected and then dropped, so blink feedback was unreachable."""
+    flow_id = await _start(hass)
+    await _configure(hass, flow_id, {"next_step_id": "bind_displays"})
+    await _configure(hass, flow_id, _display("Left", "number.meter_left"))
+    await _configure(
+        hass, flow_id, {"label": "Power", "feedback_colour": [255, 0, 255]}
+    )
+    await _configure(hass, flow_id, _assignment("sensor.solar"))
+    result = await _configure(hass, flow_id, {"next_step_id": "finish"})
+
+    assert result["options"]["presets"][0]["feedback_colour"] == [255, 0, 255]

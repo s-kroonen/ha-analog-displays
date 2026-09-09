@@ -148,6 +148,7 @@
         "menu_options": {
           "displays": "Een meter bewerken",
           "add_preset": "Voorkeuze toevoegen",
+          "edit_preset": "Voorkeuze bewerken",
           "remove_preset": "Voorkeuze verwijderen",
           "intervals": "Opvraaginterval",
           "export_yaml": "ESPHome-YAML opnieuw tonen"
@@ -155,8 +156,15 @@
       },
       "displays": {
         "title": "Een meter bewerken",
+        "description": "Welke meter wil je bewerken?",
         "data": {
-          "display_index": "Meter",
+          "display_index": "Meter"
+        }
+      },
+      "edit_display": {
+        "title": "{display} bewerken",
+        "description": "Elk veld begint bij hoe deze meter nu gekoppeld is; pas aan wat je nodig hebt en laat de rest staan.",
+        "data": {
           "name": "Naam van de meter",
           "output_entity_id": "Number-entiteit als uitgang",
           "light_entity_id": "Indicatie-led (optioneel)",
@@ -166,6 +174,20 @@
       "add_preset": {
         "title": "Voorkeuze {index}",
         "description": "Een voorkeuze is een scène over het hele apparaat: hij bepaalt wat elke meter tegelijk laat zien.",
+        "data": {
+          "label": "Naam van de voorkeuze",
+          "feedback_colour": "Knipperkleur bij omschakelen"
+        }
+      },
+      "edit_preset": {
+        "title": "Voorkeuze bewerken",
+        "data": {
+          "preset_index": "Voorkeuze"
+        }
+      },
+      "edit_preset_name": {
+        "title": "{preset} bewerken",
+        "description": "De volgende pagina's beginnen bij wat deze voorkeuze nu bevat: de bron, de kalibratie en de led-zones van elke meter.",
         "data": {
           "label": "Naam van de voorkeuze",
           "feedback_colour": "Knipperkleur bij omschakelen"
@@ -193,6 +215,15 @@
           "min_value": "De kalibratie hoort bij de voorkeuze, dus dezelfde meter kan onder elke voorkeuze een ander bereik en een andere eenheid dekken.",
           "source_mode": "Live entiteiten pushen updates. Statistieken worden opgevraagd en vereisen de recorder.",
           "zone_count": "Hoeveel kleurzones de led heeft. Elke zone krijgt een eigen pagina, in de eenheid hierboven."
+        }
+      },
+      "edit_zone": {
+        "title": "{display}: led-zone {index} van {count}",
+        "description": "De waarde in {unit} vanaf waar deze kleur geldt. Geef een eindwaarde om de led daarboven donker te laten tot de volgende zone begint.",
+        "data": {
+          "at": "Vanaf waarde",
+          "colour": "Kleur",
+          "end": "Tot waarde (optioneel)"
         }
       },
       "remove_preset": {
