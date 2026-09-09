@@ -118,6 +118,25 @@ Grid power goes negative when you export. Because normalization clamps to
 outdoor temperature, humidity and CO₂, each with its own range. Switch between
 them with the `select` entity, a button, or `analog_displays.next_preset`.
 
+### How a value reaches the needle
+
+Two mappings happen on every write, and neither needs configuring beyond the
+range you already gave the preset:
+
+1. **Source into the display's unit.** A sensor in watts against a range in kW
+   is converted; an incompatible unit holds the needle rather than showing a
+   wrong number.
+2. **The display's range onto the output's own range.** The preset says what
+   the *face* reads — 200 °C to 300 °C, −1 kW to 5 kW, 0 % to 100 % — and the
+   output entity advertises what the *signal* is. A 250 °C reading on a
+   200-300 face lands as `50` on a 0-100 number, `0.5` on the 0.0-1.0 template
+   number the wizard generates, and `128` on a 0-255 dimmer.
+
+The output's range is read live at write time, so re-flashing the board with a
+different scale needs no change here. Values outside the configured range are
+clamped: a moving-coil needle has hard stops, and driving past them is how they
+bend.
+
 ### LED gradients
 
 An LED in gradient mode is coloured by the display's *normalized* value, so a
