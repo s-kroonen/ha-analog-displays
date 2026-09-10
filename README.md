@@ -137,6 +137,17 @@ different scale needs no change here. Values outside the configured range are
 clamped: a moving-coil needle has hard stops, and driving past them is how they
 bend.
 
+**The scale belongs to the preset, not the board.** One meter can be a −1 to
+5 kW power gauge under "Power" and a 200-300 °C dial under "Climate"; switching
+preset rescales it. The board never learns either range — it receives a
+position, and all of this happens in the integration.
+
+**Trim belongs to the meter.** Each display also has a *signal at needle zero*
+and *signal at full scale*, defaulting to 0 % and 100 %. Those correct the
+movement itself — one that reaches its stop at 92 % of drive, or rests a hair
+off zero — and apply under every preset, because the deviation is the
+hardware's, not the reading's.
+
 ### LED gradients
 
 An LED in gradient mode is coloured by the display's *normalized* value, so a

@@ -20,6 +20,8 @@ CONF_STATISTICS_INTERVAL: Final = "statistics_interval"
 
 CONF_OUTPUT_ENTITY_ID: Final = "output_entity_id"
 CONF_MIN_UPDATE_INTERVAL: Final = "min_update_interval"
+CONF_OUTPUT_LOW: Final = "output_low"
+CONF_OUTPUT_HIGH: Final = "output_high"
 CONF_LED: Final = "led"
 CONF_UNIT: Final = "unit"
 
@@ -84,6 +86,12 @@ CONFIG_VERSION: Final = 2
 MAX_RGB_CHANNEL: Final = 255
 
 DEFAULT_MIN_UPDATE_INTERVAL: Final = 5.0
+
+#: Fractions of the output's own range that correspond to a resting and a
+#: fully deflected needle. The default drives the whole range; trimming it
+#: is how a meter that under- or over-reads is brought onto its markings.
+DEFAULT_OUTPUT_LOW: Final = 0.0
+DEFAULT_OUTPUT_HIGH: Final = 1.0
 DEFAULT_STATISTICS_INTERVAL: Final = 300.0
 MAX_PRESETS: Final = 8
 

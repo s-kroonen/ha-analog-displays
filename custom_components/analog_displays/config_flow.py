@@ -39,6 +39,8 @@ from .const import (
     CONF_MODE,
     CONF_NAME,
     CONF_OUTPUT_ENTITY_ID,
+    CONF_OUTPUT_HIGH,
+    CONF_OUTPUT_LOW,
     CONF_SOURCE_ENTITY_ID,
     CONF_SOURCE_MODE,
     CONF_STATISTIC_ENTITY_ID,
@@ -48,6 +50,8 @@ from .const import (
     CONF_UNIT,
     CONFIG_VERSION,
     DEFAULT_MIN_UPDATE_INTERVAL,
+    DEFAULT_OUTPUT_HIGH,
+    DEFAULT_OUTPUT_LOW,
     DOMAIN,
     LED_MODE_GRADIENT,
     LED_MODE_OFF,
@@ -136,7 +140,26 @@ def _display_schema() -> vol.Schema:
                     mode=NumberSelectorMode.BOX,
                 )
             ),
+            vol.Required(
+                CONF_OUTPUT_LOW, default=DEFAULT_OUTPUT_LOW * 100
+            ): _trim_selector(),
+            vol.Required(
+                CONF_OUTPUT_HIGH, default=DEFAULT_OUTPUT_HIGH * 100
+            ): _trim_selector(),
         }
+    )
+
+
+def _trim_selector() -> selector.NumberSelector:
+    """Build the percentage selector used for meter trim."""
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=0,
+            max=100,
+            step=0.1,
+            unit_of_measurement="%",
+            mode=NumberSelectorMode.BOX,
+        )
     )
 
 
@@ -221,6 +244,8 @@ def _display_suggestions(display: Display) -> dict[str, Any]:
         CONF_NAME: display.name,
         CONF_OUTPUT_ENTITY_ID: display.output_entity_id,
         CONF_MIN_UPDATE_INTERVAL: display.min_update_interval.total_seconds(),
+        CONF_OUTPUT_LOW: display.output_low * 100,
+        CONF_OUTPUT_HIGH: display.output_high * 100,
     }
     if display.light_entity_id:
         suggested[CONF_LIGHT_ENTITY_ID] = display.light_entity_id
@@ -871,17 +896,13 @@ class AnalogDisplaysConfigFlow(_AssignmentWalk, ConfigFlow, domain=DOMAIN):
             ):
                 errors[CONF_OUTPUT_ENTITY_ID] = "output_already_used"
             else:
-                self._displays.append(
-                    Display(
-                        name=user_input[CONF_NAME],
-                        output_entity_id=user_input[CONF_OUTPUT_ENTITY_ID],
-                        light_entity_id=user_input.get(CONF_LIGHT_ENTITY_ID),
-                        min_update_interval=_interval(user_input),
-                    )
-                )
-                if len(self._displays) < self._display_count:
-                    return await self.async_step_bind_displays()
-                return await self.async_step_preset()
+                display = _display_from_input(user_input)
+                errors = _validate_display(display)
+                if not errors:
+                    self._displays.append(display)
+                    if len(self._displays) < self._display_count:
+                        return await self.async_step_bind_displays()
+                    return await self.async_step_preset()
 
         return self.async_show_form(
             step_id="bind_displays",
@@ -960,6 +981,30 @@ class AnalogDisplaysConfigFlow(_AssignmentWalk, ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(
             title=self._name, data={}, options=device.to_dict()
         )
+
+
+def _display_from_input(user_input: dict[str, Any]) -> Display:
+    """Build a display from a submitted form, trim included."""
+    return Display(
+        name=user_input[CONF_NAME],
+        output_entity_id=user_input[CONF_OUTPUT_ENTITY_ID],
+        light_entity_id=user_input.get(CONF_LIGHT_ENTITY_ID),
+        min_update_interval=_interval(user_input),
+        output_low=_trim(user_input, CONF_OUTPUT_LOW, DEFAULT_OUTPUT_LOW),
+        output_high=_trim(user_input, CONF_OUTPUT_HIGH, DEFAULT_OUTPUT_HIGH),
+    )
+
+
+def _trim(user_input: dict[str, Any], field: str, default: float) -> float:
+    """Read one trim field, asked as a percentage and stored as a fraction."""
+    return float(user_input.get(field, default * 100)) / 100
+
+
+def _validate_display(display: Display) -> dict[str, str]:
+    """Check a display's own numbers, independently of what it is bound to."""
+    if display.output_low == display.output_high:
+        return {CONF_OUTPUT_HIGH: "same_output_trim"}
+    return {}
 
 
 def _interval(user_input: dict[str, Any]) -> timedelta:
@@ -1194,14 +1239,12 @@ class AnalogDisplaysOptionsFlow(_AssignmentWalk, OptionsFlowWithReload):
             ):
                 errors[CONF_OUTPUT_ENTITY_ID] = "output_already_used"
             else:
-                displays = list(device.displays)
-                displays[index] = Display(
-                    name=user_input[CONF_NAME],
-                    output_entity_id=output,
-                    light_entity_id=user_input.get(CONF_LIGHT_ENTITY_ID),
-                    min_update_interval=_interval(user_input),
-                )
-                return self._save(replace(device, displays=displays))
+                edited = _display_from_input(user_input)
+                errors = _validate_display(edited)
+                if not errors:
+                    displays = list(device.displays)
+                    displays[index] = edited
+                    return self._save(replace(device, displays=displays))
 
         return self.async_show_form(
             step_id="edit_display",

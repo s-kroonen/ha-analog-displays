@@ -48,10 +48,24 @@ class UnknownOutputRangeError(RuntimeError):
 class NumberEntityBackend(OutputBackend):
     """Write a normalized value into a ``number`` entity's own range."""
 
-    def __init__(self, hass: HomeAssistant, entity_id: str) -> None:
-        """Bind the backend to a target ``number`` entity."""
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entity_id: str,
+        low: float = 0.0,
+        high: float = 1.0,
+    ) -> None:
+        """Bind the backend to a target ``number`` entity.
+
+        ``low``/``high`` trim for the meter itself, as fractions of the target's
+        range: the drive at which this movement rests and the drive at which it
+        reads full scale. They belong to the hardware, so they apply under every
+        preset, unlike the preset's own range which is in real units.
+        """
         self._hass = hass
         self._entity_id = entity_id
+        self._low = low
+        self._high = high
 
     @property
     def entity_id(self) -> str:
@@ -96,7 +110,8 @@ class NumberEntityBackend(OutputBackend):
     async def write(self, value: NormalizedValue) -> None:
         """Scale into the target's range and call ``number.set_value``."""
         out_min, out_max, step = self._target_range()
-        target = to_target(value.normalized, out_min, out_max, step)
+        drive = self._low + value.normalized * (self._high - self._low)
+        target = to_target(drive, out_min, out_max, step)
 
         _LOGGER.debug(
             "Writing %s to %s (normalized %.3f)",

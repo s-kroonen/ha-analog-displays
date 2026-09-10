@@ -232,6 +232,8 @@ async def test_editing_a_display_starts_from_its_current_binding(
         "output_entity_id": "number.meter_left",
         "light_entity_id": "light.led_left",
         "min_update_interval": 12.0,
+        "output_low": 0.0,
+        "output_high": 100.0,
     }
     assert result["description_placeholders"] == {"display": "Left"}
 
@@ -681,3 +683,37 @@ async def test_a_rejected_assignment_keeps_what_was_typed(
     assert result["errors"] == {"unit": "incompatible_unit"}
     assert _suggested(result)["max_value"] == 40.0
     assert _suggested(result)["unit"] == "°C"
+
+
+# --- per-meter trim ---------------------------------------------------------
+
+
+async def test_meter_trim_round_trips_as_a_percentage(hass: HomeAssistant) -> None:
+    """Stored as a fraction, asked as a percentage; both directions must agree."""
+    displays = device_options()["displays"]
+    displays[0] = displays[0] | {"output_low": 0.02, "output_high": 0.92}
+    entry = await _setup(hass, displays=displays)
+
+    result = await _menu(hass, entry, "displays")
+    assert _suggested(result)["output_low"] == 2.0
+    assert _suggested(result)["output_high"] == 92.0
+
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], _suggested(result) | {"output_high": 95.0}
+    )
+    await hass.async_block_till_done()
+
+    display = entry.runtime_data.device.displays[0]
+    assert display.output_low == pytest.approx(0.02)
+    assert display.output_high == pytest.approx(0.95)
+
+
+async def test_an_empty_trim_span_is_rejected(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    result = await _menu(hass, entry, "displays")
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], _display_form(output_low=50.0, output_high=50.0)
+    )
+
+    assert result["errors"] == {"output_high": "same_output_trim"}
