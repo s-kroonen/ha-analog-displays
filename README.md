@@ -118,6 +118,36 @@ Grid power goes negative when you export. Because normalization clamps to
 outdoor temperature, humidity and CO₂, each with its own range. Switch between
 them with the `select` entity, a button, or `analog_displays.next_preset`.
 
+### How a value reaches the needle
+
+Two mappings happen on every write, and neither needs configuring beyond the
+range you already gave the preset:
+
+1. **Source into the display's unit.** A sensor in watts against a range in kW
+   is converted; an incompatible unit holds the needle rather than showing a
+   wrong number.
+2. **The display's range onto the output's own range.** The preset says what
+   the *face* reads — 200 °C to 300 °C, −1 kW to 5 kW, 0 % to 100 % — and the
+   output entity advertises what the *signal* is. A 250 °C reading on a
+   200-300 face lands as `50` on a 0-100 number, `0.5` on the 0.0-1.0 template
+   number the wizard generates, and `128` on a 0-255 dimmer.
+
+The output's range is read live at write time, so re-flashing the board with a
+different scale needs no change here. Values outside the configured range are
+clamped: a moving-coil needle has hard stops, and driving past them is how they
+bend.
+
+**The scale belongs to the preset, not the board.** One meter can be a −1 to
+5 kW power gauge under "Power" and a 200-300 °C dial under "Climate"; switching
+preset rescales it. The board never learns either range — it receives a
+position, and all of this happens in the integration.
+
+**Trim belongs to the meter.** Each display also has a *signal at needle zero*
+and *signal at full scale*, defaulting to 0 % and 100 %. Those correct the
+movement itself — one that reaches its stop at 92 % of drive, or rests a hair
+off zero — and apply under every preset, because the deviation is the
+hardware's, not the reading's.
+
 ### LED gradients
 
 An LED in gradient mode is coloured by the display's *normalized* value, so a
@@ -131,6 +161,18 @@ For a battery gauge with stops at red 20 %, amber 50 % and green 80 %:
 
 Give a stop an explicit end to leave a deliberate dark band before the next one
 begins.
+
+## Changing things later
+
+**Configure** on the device opens the same questions again, and every one of
+them starts from what is stored rather than from a blank form:
+
+- **Edit a display** — its name, output entity, indicator LED and debounce
+  interval. With one display the picker is skipped.
+- **Edit a preset** — its name, blink colour, and then, for every display, the
+  source, unit, range, LED mode and each LED zone in turn. Change one threshold
+  and leave the rest as they are.
+- **Add** or **remove** a preset, and change the statistics polling interval.
 
 ## Entities and services
 

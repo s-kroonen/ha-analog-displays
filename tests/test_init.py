@@ -247,3 +247,154 @@ async def test_a_failing_write_does_not_take_the_entry_down(
 
     assert entry.state is ConfigEntryState.LOADED
     assert entry.runtime_data.controllers[0].last_value is None
+
+
+def _range_preset(low: float, high: float, unit: str | None = None) -> dict[str, Any]:
+    """One display reading sensor.solar against an arbitrary real-world range."""
+    assignment: dict[str, Any] = {
+        "source_mode": "entity",
+        "source_entity_id": "sensor.solar",
+        "min_value": low,
+        "max_value": high,
+        "colour": None,
+    }
+    if unit is not None:
+        assignment["unit"] = unit
+    return {"label": "Power", "assignments": {"0": assignment}}
+
+
+@pytest.mark.parametrize(
+    ("reading", "expected"),
+    [
+        ("200", 0.0),  # bottom of the dial
+        ("250", 50.0),  # halfway
+        ("300", 100.0),  # full scale
+        ("350", 100.0),  # past the end stop, which has no give
+        ("150", 0.0),
+    ],
+)
+async def test_a_200_to_300_degree_dial_maps_onto_a_0_100_output(
+    hass: HomeAssistant,
+    set_value_calls: list[ServiceCall],
+    reading: str,
+    expected: float,
+) -> None:
+    """The face reads 200-300 °C; the signal is 0-100. The needle is the map."""
+    hass.states.async_set("number.meter_left", "0", {"min": 0, "max": 100, "step": 0.1})
+    hass.states.async_set(
+        "sensor.solar",
+        reading,
+        {"unit_of_measurement": "°C", "device_class": "temperature"},
+    )
+
+    await _setup(hass, presets=[_range_preset(200.0, 300.0)])
+
+    assert set_value_calls[-1].data["value"] == pytest.approx(expected)
+    assert set_value_calls[-1].data["entity_id"] == "number.meter_left"
+
+
+async def test_a_negative_to_positive_kw_dial_maps_onto_a_0_100_output(
+    hass: HomeAssistant, set_value_calls: list[ServiceCall]
+) -> None:
+    """-1 kW to 5 kW from a sensor in watts: converted, then mapped."""
+    hass.states.async_set("number.meter_left", "0", {"min": 0, "max": 100, "step": 0.1})
+    hass.states.async_set(
+        "sensor.solar", "2000", {"unit_of_measurement": "W", "device_class": "power"}
+    )
+
+    await _setup(hass, presets=[_range_preset(-1.0, 5.0, unit="kW")])
+
+    # 2000 W is 2 kW, which sits halfway between -1 kW and 5 kW.
+    assert set_value_calls[-1].data["value"] == pytest.approx(50.0)
+
+
+async def test_an_export_reading_pins_the_needle_at_the_bottom(
+    hass: HomeAssistant, set_value_calls: list[ServiceCall]
+) -> None:
+    """Below the configured minimum the needle rests, it does not go negative."""
+    hass.states.async_set("number.meter_left", "0", {"min": 0, "max": 100, "step": 0.1})
+    hass.states.async_set(
+        "sensor.solar", "-3000", {"unit_of_measurement": "W", "device_class": "power"}
+    )
+
+    await _setup(hass, presets=[_range_preset(-1.0, 5.0, unit="kW")])
+
+    assert set_value_calls[-1].data["value"] == pytest.approx(0.0)
+
+
+async def test_meter_trim_is_applied_under_every_preset(
+    hass: HomeAssistant, set_value_calls: list[ServiceCall]
+) -> None:
+    """A movement that stops at 92% of drive still reads full scale there."""
+    hass.states.async_set("number.meter_left", "0", {"min": 0, "max": 100, "step": 0.1})
+    hass.states.async_set(
+        "sensor.solar",
+        "300",
+        {"unit_of_measurement": "°C", "device_class": "temperature"},
+    )
+    displays = device_options()["displays"]
+    displays[0] = displays[0] | {"output_low": 0.02, "output_high": 0.92}
+
+    await _setup(hass, displays=displays, presets=[_range_preset(200.0, 300.0)])
+
+    # Full scale on the face, but only 92% of the signal reaches the stop.
+    assert set_value_calls[-1].data["value"] == pytest.approx(92.0)
+
+
+async def test_meter_trim_lifts_a_resting_needle_off_zero(
+    hass: HomeAssistant, set_value_calls: list[ServiceCall]
+) -> None:
+    hass.states.async_set("number.meter_left", "0", {"min": 0, "max": 100, "step": 0.1})
+    hass.states.async_set(
+        "sensor.solar",
+        "200",
+        {"unit_of_measurement": "°C", "device_class": "temperature"},
+    )
+    displays = device_options()["displays"]
+    displays[0] = displays[0] | {"output_low": 0.02, "output_high": 0.92}
+
+    await _setup(hass, displays=displays, presets=[_range_preset(200.0, 300.0)])
+
+    assert set_value_calls[-1].data["value"] == pytest.approx(2.0)
+
+
+async def test_two_presets_put_different_scales_on_one_display(
+    hass: HomeAssistant,
+    set_value_calls: list[ServiceCall],
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The scale is the preset's, so switching preset rescales the same meter."""
+    hass.states.async_set("number.meter_left", "0", {"min": 0, "max": 100, "step": 0.1})
+    hass.states.async_set(
+        "sensor.solar", "2000", {"unit_of_measurement": "W", "device_class": "power"}
+    )
+    hass.states.async_set(
+        "sensor.indoor",
+        "250",
+        {"unit_of_measurement": "°C", "device_class": "temperature"},
+    )
+    climate = _range_preset(200.0, 300.0)
+    climate["label"] = "Climate"
+    climate["assignments"]["0"]["source_entity_id"] = "sensor.indoor"
+
+    entry = await _setup(hass, presets=[_range_preset(-1.0, 5.0, unit="kW"), climate])
+
+    # 2000 W is 2 kW, halfway across -1 to 5 kW.
+    assert set_value_calls[-1].data["value"] == pytest.approx(50.0)
+
+    await entry.runtime_data.async_set_preset(1)
+    await hass.async_block_till_done()
+
+    # Same meter, same 0-100 signal, a completely different scale: 250 °C is
+    # halfway across 200-300, so the needle lands in the same place for an
+    # unrelated reason.
+    assert set_value_calls[-1].data["value"] == pytest.approx(50.0)
+
+    hass.states.async_set(
+        "sensor.indoor",
+        "275",
+        {"unit_of_measurement": "°C", "device_class": "temperature"},
+    )
+    await settle(hass, freezer)
+
+    assert set_value_calls[-1].data["value"] == pytest.approx(75.0)

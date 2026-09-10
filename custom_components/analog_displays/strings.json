@@ -25,11 +25,14 @@
           "name": "Display name",
           "output_entity_id": "Output number entity",
           "light_entity_id": "Indicator LED (optional)",
-          "min_update_interval": "Minimum update interval"
+          "min_update_interval": "Minimum update interval",
+          "output_low": "Signal at needle zero",
+          "output_high": "Signal at full scale"
         },
         "data_description": {
           "min_update_interval": "Rapid source updates are coalesced to at most one write per interval, which spares a mechanical movement.",
-          "light_entity_id": "Which light this display drives. What colour it shows is set per preset, alongside that preset's scale."
+          "light_entity_id": "Which light this display drives. What colour it shows is set per preset, alongside that preset's scale.",
+          "output_low": "Trim for this meter itself, as a share of the output's range. Leave at 0 % and 100 % unless the movement rests off zero or reaches its stop early — the value being shown is set by the preset, in real units."
         }
       },
       "preset": {
@@ -135,7 +138,8 @@
       "pin_not_output_capable": "That pin is input-only and cannot drive a display or LED.",
       "pin_not_on_board": "That pin does not exist on this board.",
       "incompatible_unit": "That source cannot be read in that unit. Check the unit matches the kind of quantity the sensor reports.",
-      "source_not_numeric": "That entity's state is not a number."
+      "source_not_numeric": "That entity's state is not a number.",
+      "same_output_trim": "The signal at needle zero and at full scale must differ."
     },
     "abort": {
       "invalid_configuration": "The configuration that was assembled is not valid."
@@ -215,6 +219,7 @@
         "menu_options": {
           "displays": "Edit a display",
           "add_preset": "Add a preset",
+          "edit_preset": "Edit a preset",
           "remove_preset": "Remove a preset",
           "intervals": "Polling interval",
           "export_yaml": "Show the ESPHome YAML again"
@@ -222,17 +227,43 @@
       },
       "displays": {
         "title": "Edit a display",
+        "description": "Which display do you want to edit?",
         "data": {
-          "display_index": "Display",
+          "display_index": "Display"
+        }
+      },
+      "edit_display": {
+        "title": "Edit {display}",
+        "description": "Every field starts from how this display is bound today; change what you need and leave the rest.",
+        "data": {
           "name": "Display name",
           "output_entity_id": "Output number entity",
           "light_entity_id": "Indicator LED (optional)",
-          "min_update_interval": "Minimum update interval"
+          "min_update_interval": "Minimum update interval",
+          "output_low": "Signal at needle zero",
+          "output_high": "Signal at full scale"
+        },
+        "data_description": {
+          "output_low": "Trim for this meter itself, as a share of the output's range. Leave at 0 % and 100 % unless the movement rests off zero or reaches its stop early — the value being shown is set by the preset, in real units."
         }
       },
       "add_preset": {
         "title": "Preset {index}",
         "description": "A preset is a scene across the whole device: it decides what every display shows at once.",
+        "data": {
+          "label": "Preset name",
+          "feedback_colour": "Blink colour on switching to this preset"
+        }
+      },
+      "edit_preset": {
+        "title": "Edit a preset",
+        "data": {
+          "preset_index": "Preset"
+        }
+      },
+      "edit_preset_name": {
+        "title": "Edit {preset}",
+        "description": "The pages that follow start from what this preset holds today: its source, calibration and LED zones for every display.",
         "data": {
           "label": "Preset name",
           "feedback_colour": "Blink colour on switching to this preset"
@@ -260,6 +291,15 @@
           "min_value": "Calibration belongs to the preset, so the same display can cover a different range and unit under each preset.",
           "source_mode": "Live entities push updates. Statistics are polled, and need the recorder.",
           "zone_count": "How many colour zones the LED has. Each is entered on its own page, in the unit above."
+        }
+      },
+      "edit_zone": {
+        "title": "{display}: LED zone {index} of {count}",
+        "description": "The value in {unit} from which this colour applies. Give an end to leave the LED dark above it until the next zone begins.",
+        "data": {
+          "at": "From value",
+          "colour": "Colour",
+          "end": "Until value (optional)"
         }
       },
       "remove_preset": {
@@ -292,7 +332,8 @@
       "pin_not_output_capable": "That pin is input-only and cannot drive a display or LED.",
       "pin_not_on_board": "That pin does not exist on this board.",
       "incompatible_unit": "That source cannot be read in that unit. Check the unit matches the kind of quantity the sensor reports.",
-      "source_not_numeric": "That entity's state is not a number."
+      "source_not_numeric": "That entity's state is not a number.",
+      "same_output_trim": "The signal at needle zero and at full scale must differ."
     },
     "abort": {
       "invalid_configuration": "The configuration that was assembled is not valid.",

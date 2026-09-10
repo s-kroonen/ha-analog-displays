@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Editing starts from the configuration in force.** Every field on every
+  edit page is pre-filled with what is stored: a display's name, output, LED
+  and interval, and a preset's name, blink colour, source, unit, range, LED
+  mode and each of its zones. Changing one threshold no longer means retyping
+  a display's whole calibration from memory, which is how thresholds drift out
+  of step with the meter they describe.
+- Editing a display asks which one first and then shows that display's own
+  form, so the fields can be filled in from it. With a single display the
+  picker is skipped.
+
+### Added
+
+- **Per-meter trim.** Each display gains a *signal at needle zero* and a *signal
+  at full scale*, as percentages of its output's range, defaulting to 0 % and
+  100 %. They correct the movement itself — one that hits its stop at 92 % of
+  drive, or rests off zero — and apply under every preset, since the deviation
+  belongs to the hardware. The value being shown is still scaled by the preset,
+  in real units.
+- **Presets can be edited.** Previously the only way to change a preset's
+  range, unit or LED zones was to delete it and build it again from an empty
+  form, which also lost its position in the list.
+
+### Fixed
+
+- **A preset's blink colour is now stored.** It was collected during setup and
+  then dropped, so the light feedback on switching presets could not be
+  configured at all.
+- **LED zones can be set when adding a preset from the options flow.** It
+  asked how many zones to use and then never asked for them, leaving a
+  gradient preset that failed validation.
+- A preset rejected for driving nothing left the flow pointing past the last
+  display, so the form it showed could not be submitted.
+
 ## [0.1.1]
 
 ### Changed

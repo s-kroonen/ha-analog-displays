@@ -78,7 +78,12 @@ class DisplayController:
         self.index = index
         self.display = display
 
-        self._backend = NumberEntityBackend(self.hass, display.output_entity_id)
+        self._backend = NumberEntityBackend(
+            self.hass,
+            display.output_entity_id,
+            display.output_low,
+            display.output_high,
+        )
         self._unsubscribe: Callable[[], None] | None = None
         self._listeners: list[Callable[[], None]] = []
 

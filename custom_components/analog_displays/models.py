@@ -41,6 +41,8 @@ from .const import (
     CONF_MODE,
     CONF_NAME,
     CONF_OUTPUT_ENTITY_ID,
+    CONF_OUTPUT_HIGH,
+    CONF_OUTPUT_LOW,
     CONF_PRESETS,
     CONF_SERVICE,
     CONF_SERVICE_DATA,
@@ -56,6 +58,8 @@ from .const import (
     CONF_TRIGGER_ENTITY_ID,
     CONF_UNIT,
     DEFAULT_MIN_UPDATE_INTERVAL,
+    DEFAULT_OUTPUT_HIGH,
+    DEFAULT_OUTPUT_LOW,
     DEFAULT_STATISTICS_INTERVAL,
     LED_MODE_GRADIENT,
     LED_MODE_PRESET,
@@ -152,6 +156,18 @@ class Display:
         default=timedelta(seconds=DEFAULT_MIN_UPDATE_INTERVAL)
     )
 
+    output_low: float = DEFAULT_OUTPUT_LOW
+    output_high: float = DEFAULT_OUTPUT_HIGH
+    """Where this meter actually rests and hits full scale, as fractions of the
+    output's own range.
+
+    This is the one genuinely per-meter number, and it is not a scale: the scale
+    is the preset's, in real units. This corrects for the meter itself — a
+    movement that reaches its stop at 92% of full drive, or one whose needle
+    sits a hair off zero unpowered. It applies under every preset, because the
+    deviation belongs to the hardware, not to what is being shown.
+    """
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for config entry options."""
         return {
@@ -159,6 +175,8 @@ class Display:
             CONF_OUTPUT_ENTITY_ID: self.output_entity_id,
             CONF_LIGHT_ENTITY_ID: self.light_entity_id,
             CONF_MIN_UPDATE_INTERVAL: self.min_update_interval.total_seconds(),
+            CONF_OUTPUT_LOW: self.output_low,
+            CONF_OUTPUT_HIGH: self.output_high,
         }
 
     @classmethod
@@ -173,6 +191,8 @@ class Display:
                     data.get(CONF_MIN_UPDATE_INTERVAL, DEFAULT_MIN_UPDATE_INTERVAL)
                 )
             ),
+            output_low=float(data.get(CONF_OUTPUT_LOW, DEFAULT_OUTPUT_LOW)),
+            output_high=float(data.get(CONF_OUTPUT_HIGH, DEFAULT_OUTPUT_HIGH)),
         )
 
     def validate(self, where: str) -> None:
@@ -184,6 +204,15 @@ class Display:
         if self.min_update_interval < timedelta(0):
             raise AnalogDisplaysConfigError(
                 f"{where}: minimum update interval cannot be negative"
+            )
+        if self.output_low == self.output_high:
+            raise AnalogDisplaysConfigError(
+                f"{where}: the meter's resting and full-scale drive must differ"
+            )
+        trim = (self.output_low, self.output_high)
+        if not all(0.0 <= value <= 1.0 for value in trim):
+            raise AnalogDisplaysConfigError(
+                f"{where}: meter trim must stay within the output's own range"
             )
 
 
